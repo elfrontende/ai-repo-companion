@@ -28,6 +28,7 @@ export async function ensureWorkspace(rootDir) {
     "config",
     "notes",
     "state/agents",
+    "state/benchmarks",
     "state/memory",
     "state/reviews",
     "state/reviews/approvals",

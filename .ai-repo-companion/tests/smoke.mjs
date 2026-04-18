@@ -36,6 +36,7 @@ import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
+import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -661,6 +662,22 @@ await writeJson(path.join(doctorRoot, "state/memory/review-queue.json"), [
 const doctorStatus = await runRuntimeDoctor(doctorRoot, await readJson(path.join(doctorRoot, "config/system.json"), {}));
 assert.equal(doctorStatus.ok, false);
 assert.ok(doctorStatus.findings.some((finding) => finding.code === "missing-approval-file"));
+
+const benchmarkRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-benchmark-"));
+await fs.cp(path.resolve("config"), path.join(benchmarkRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(benchmarkRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(benchmarkRoot, "state"), { recursive: true });
+await ensureWorkspace(benchmarkRoot);
+
+const benchmarkResult = await runSyntheticBenchmark(
+  benchmarkRoot,
+  await readJson(path.join(benchmarkRoot, "config/system.json"), {})
+);
+assert.equal(benchmarkResult.report.tasks.length, 5);
+assert.ok(benchmarkResult.report.aggregate.tokensSaved > 0);
+assert.ok(benchmarkResult.report.tasks.some((task) => task.savings.tokensSaved > 0));
+const benchmarkReport = await readJson(path.join(benchmarkRoot, "state/benchmarks/last-benchmark.json"), null);
+assert.equal(benchmarkReport.aggregate.taskCount, 5);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

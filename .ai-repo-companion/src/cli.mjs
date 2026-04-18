@@ -13,6 +13,7 @@ import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning } from "./lib/policy-tuning-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.mjs";
+import { runSyntheticBenchmark } from "./lib/benchmark-engine.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +64,9 @@ switch (command) {
     break;
   case "doctor":
     output(await runDoctor());
+    break;
+  case "benchmark":
+    output(await runBenchmark());
     break;
   case "metrics":
     output(await runMetrics());
@@ -169,6 +173,14 @@ async function runDoctor() {
     rootDir,
     mode: "doctor",
     doctor: await runRuntimeDoctor(rootDir, systemConfig)
+  };
+}
+
+async function runBenchmark() {
+  return {
+    rootDir,
+    mode: "benchmark",
+    benchmark: await runSyntheticBenchmark(rootDir, systemConfig)
   };
 }
 
@@ -323,6 +335,7 @@ function helpText() {
       "node src/cli.mjs queue",
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
+      "node src/cli.mjs benchmark",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
       "node src/cli.mjs tune --apply",
