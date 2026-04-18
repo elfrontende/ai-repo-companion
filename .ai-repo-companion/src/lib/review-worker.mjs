@@ -9,6 +9,11 @@ import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
 import { rankReviewOperations } from "./review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "./review-idempotency-engine.mjs";
 import {
+  assessReviewApprovalRequirement,
+  approveReviewJob,
+  createApprovalRequest
+} from "./review-approval-engine.mjs";
+import {
   beginReviewApplyRecovery,
   completeReviewApplyRecovery,
   recoverInterruptedReviewRun
@@ -24,6 +29,7 @@ export async function inspectReviewQueue(rootDir) {
     total: queue.length,
     queued: queue.filter((job) => job.status === "queued").length,
     running: queue.filter((job) => job.status === "running").length,
+    awaitingApproval: queue.filter((job) => job.status === "awaiting-approval").length,
     completed: queue.filter((job) => job.status === "completed").length,
     failed: queue.filter((job) => job.status === "failed").length,
     jobs: queue
@@ -122,40 +128,90 @@ export async function processReviewQueue(rootDir, config, options = {}) {
       const payload = await buildReviewPayload(rootDir, job, staleness);
       const effectiveConfig = options.reviewConfig ?? config;
       const execution = await executeReviewPayload(rootDir, payload, effectiveConfig);
-      // Persist a pre-apply report before we mutate any note files.
-      // This gives recovery code a stable artifact to update later if the
-      // process crashes in the middle of note application.
-      const pendingReportPath = await persistReviewReport(rootDir, job.id, {
-        job,
-        payload,
-        execution,
-        noteChanges: {
-          applied: [],
-          skipped: [],
-          reason: "Review execution completed. Local note apply has not finished yet."
-        },
-        staleness,
-        recovery: {
-          stage: "pending-apply"
-        }
-      });
-      const recoverySession = await beginReviewApplyRecovery(
-        rootDir,
-        job,
-        pendingReportPath,
-        effectiveConfig.reviewExecution?.recovery ?? {}
-      );
-
       const finishedAt = new Date().toISOString();
-      const noteChanges = await maybeApplyReviewOperations(rootDir, execution, effectiveConfig, finishedAt);
-      // Once note apply succeeds, the recovery session can be cleared.
-      // If note apply throws before this point, the session stays on disk and
-      // the next worker run will restore the backup automatically.
-      const recoveryCompletion = await completeReviewApplyRecovery(
-        rootDir,
-        recoverySession,
-        effectiveConfig.reviewExecution?.recovery ?? {}
+      const notePlan = await planReviewNoteChanges(rootDir, execution, effectiveConfig, job);
+      const approvalDecision = assessReviewApprovalRequirement(
+        job,
+        effectiveConfig.reviewExecution?.approval ?? {}
       );
+      let noteChanges = notePlan;
+      let recoveryCompletion = {
+        completed: false,
+        reason: "No local note apply was needed for this review run."
+      };
+
+      if (notePlan.shouldApply && approvalDecision.required) {
+        const pendingApprovalReportPath = await persistReviewReport(rootDir, job.id, {
+          job,
+          payload,
+          execution,
+          noteChanges: {
+            ...notePlan,
+            approval: {
+              status: "pending",
+              reasons: approvalDecision.reasons
+            },
+            applied: [],
+            skipped: notePlan.skipped ?? [],
+            reason: "Review run produced valid note changes, but local approval is required before apply."
+          },
+          staleness,
+          recovery: {
+            stage: "not-needed"
+          }
+        });
+        const approvalRequest = await createApprovalRequest(
+          rootDir,
+          job,
+          pendingApprovalReportPath,
+          notePlan,
+          approvalDecision
+        );
+        noteChanges = {
+          ...notePlan,
+          approval: {
+            status: "pending",
+            reasons: approvalDecision.reasons,
+            approvalPath: approvalRequest.approvalPath
+          },
+          applied: [],
+          reason: "Review run is waiting for explicit approval before note apply."
+        };
+      } else if (notePlan.shouldApply) {
+        // Persist a pre-apply report before we mutate any note files.
+        // This gives recovery code a stable artifact to update later if the
+        // process crashes in the middle of note application.
+        const pendingReportPath = await persistReviewReport(rootDir, job.id, {
+          job,
+          payload,
+          execution,
+          noteChanges: {
+            applied: [],
+            skipped: [],
+            reason: "Review execution completed. Local note apply has not finished yet."
+          },
+          staleness,
+          recovery: {
+            stage: "pending-apply"
+          }
+        });
+        const recoverySession = await beginReviewApplyRecovery(
+          rootDir,
+          job,
+          pendingReportPath,
+          effectiveConfig.reviewExecution?.recovery ?? {}
+        );
+        noteChanges = await applyPlannedReviewNoteChanges(rootDir, notePlan, finishedAt);
+        // Once note apply succeeds, the recovery session can be cleared.
+        // If note apply throws before this point, the session stays on disk and
+        // the next worker run will restore the backup automatically.
+        recoveryCompletion = await completeReviewApplyRecovery(
+          rootDir,
+          recoverySession,
+          effectiveConfig.reviewExecution?.recovery ?? {}
+        );
+      }
+
       const report = {
         job,
         payload,
@@ -167,7 +223,9 @@ export async function processReviewQueue(rootDir, config, options = {}) {
       };
       const reportPath = await persistReviewReport(rootDir, job.id, report);
 
-      job.status = execution.status === "failed" ? "failed" : "completed";
+      job.status = execution.status === "failed"
+        ? "failed"
+        : (noteChanges.approval?.status === "pending" ? "awaiting-approval" : "completed");
       job.finishedAt = finishedAt;
       job.reportPath = reportPath;
       job.execution = {
@@ -175,8 +233,11 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         adapter: execution.adapter,
         status: execution.status
       };
+      if (noteChanges.approval?.status === "pending") {
+        job.approval = noteChanges.approval;
+      }
 
-      if (job.status === "completed") {
+      if (job.status === "completed" || job.status === "awaiting-approval") {
         releaseQueuedSlots(policyState, job.domains);
       }
 
@@ -366,6 +427,15 @@ function releaseQueuedSlots(policyState, domains) {
 }
 
 async function maybeApplyReviewOperations(rootDir, execution, config, timestamp) {
+  const notePlan = await planReviewNoteChanges(rootDir, execution, config, { mode: "unknown", domains: [] });
+  if (!notePlan.shouldApply) {
+    return notePlan;
+  }
+
+  return applyPlannedReviewNoteChanges(rootDir, notePlan, timestamp);
+}
+
+export async function planReviewNoteChanges(rootDir, execution, config, job = { mode: "unknown", domains: [] }) {
   const operations = execution.output?.parsed?.operations;
   if (!Array.isArray(operations) || operations.length === 0) {
     return {
@@ -375,6 +445,9 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
         rejected: [],
         reason: "Execution produced no structured note operations."
       },
+      selectedOperations: [],
+      deferredOperations: [],
+      shouldApply: false,
       applied: [],
       skipped: [],
       reason: "Execution produced no structured note operations."
@@ -387,6 +460,9 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
     return {
       normalization: normalized,
       qualityGate,
+      selectedOperations: [],
+      deferredOperations: [],
+      shouldApply: false,
       applied: [],
       skipped: qualityGate.rejected,
       reason: qualityGate.reason
@@ -403,6 +479,9 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
       normalization: normalized,
       qualityGate,
       idempotency,
+      selectedOperations: [],
+      deferredOperations: [],
+      shouldApply: false,
       applied: [],
       skipped: idempotency.rejected,
       reason: idempotency.reason
@@ -420,18 +499,36 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
       qualityGate,
       idempotency,
       ranking,
+      selectedOperations: [],
+      deferredOperations: ranking.deferred,
+      shouldApply: false,
       applied: [],
       skipped: ranking.deferred,
       reason: ranking.reason
     };
   }
 
-  const appliedResult = await applyReviewOperations(rootDir, ranking.selected, { timestamp });
   return {
     normalization: normalized,
     qualityGate,
     idempotency,
     ranking,
+    selectedOperations: ranking.selected,
+    deferredOperations: ranking.deferred,
+    shouldApply: ranking.selected.length > 0,
+    applied: [],
+    skipped: ranking.deferred
+  };
+}
+
+async function applyPlannedReviewNoteChanges(rootDir, notePlan, timestamp) {
+  const appliedResult = await applyReviewOperations(rootDir, notePlan.selectedOperations ?? [], { timestamp });
+  return {
+    ...notePlan,
     ...appliedResult
   };
+}
+
+export async function approvePendingReview(rootDir, jobId, config) {
+  return approveReviewJob(rootDir, jobId, config);
 }
