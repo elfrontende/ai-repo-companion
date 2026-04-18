@@ -116,6 +116,11 @@
       "minSimilarityScore": 7,
       "rewriteDuplicatesToAppendUpdate": true
     },
+    "queueCompaction": {
+      "enabled": true,
+      "maxTasksPerJob": 3,
+      "mergeWindowMinutes": 30
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,

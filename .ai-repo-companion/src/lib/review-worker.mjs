@@ -114,7 +114,10 @@ async function buildReviewPayload(rootDir, job) {
   // Review jobs use the same bounded retrieval strategy as normal task work.
   // This prevents the memory maintenance layer from becoming a token sink.
   const notes = await loadNotes(rootDir);
-  const contextTask = `${job.task} ${job.domains.join(" ")} ${job.mode} memory review`;
+  const mergedTasks = Array.isArray(job.tasks) && job.tasks.length > 0
+    ? job.tasks.map((entry) => entry.task).join(" ")
+    : job.task;
+  const contextTask = `${mergedTasks} ${job.domains.join(" ")} ${job.mode} memory review`;
   const contextBundle = assembleContext(contextTask, notes, {
     tokenBudget: job.budget,
     maxNotes: 8

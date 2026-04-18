@@ -179,6 +179,8 @@ async function executeCommandAdapter(rootDir, provider, payload, commandConfig) 
 }
 
 function buildReviewPrompt(payload) {
+  const mergedTasks = Array.isArray(payload.job.tasks) ? payload.job.tasks : [];
+
   return [
     "You are maintaining a Zettelkasten memory graph for a repository assistant.",
     "Return only structured JSON that matches the provided schema.",
@@ -191,6 +193,12 @@ function buildReviewPrompt(payload) {
     `Domains: ${payload.job.domains.join(", ")}`,
     `Budget: ${payload.job.budget} tokens`,
     `Task: ${payload.job.task}`,
+    ...(mergedTasks.length > 1
+      ? [
+        `Merged tasks in this review job: ${mergedTasks.length}`,
+        ...mergedTasks.map((entry, index) => `- task ${index + 1}: ${entry.task}`)
+      ]
+      : []),
     "",
     "Why this review was queued:",
     ...payload.job.reasons.map((reason) => `- ${reason}`),

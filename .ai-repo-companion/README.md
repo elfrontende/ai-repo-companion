@@ -50,6 +50,7 @@ npm test
 - pointer-only working memory so long-term knowledge remains in notes
 - memory policy engine with `cheap`, `balanced`, and `expensive` review modes
 - queued review jobs for future LLM-backed memory cleanup instead of hidden always-on background costs
+- queue compaction so closely related review jobs can merge before they spend another live model run
 - review worker that consumes queued jobs and stores execution reports
 - background review runner with `once` and `loop` modes
 - pluggable provider adapter layer with `dry-run` and `command` execution modes
@@ -133,6 +134,12 @@ By default, the worker uses the `dry-run` adapter. That means:
 - the prepared prompt and bounded context bundle are written into a report file
 
 This makes the pipeline safe to test before any provider integration exists.
+
+Queue compaction is now enabled by default. When two nearby queued jobs share
+the same mode and at least one domain, the second job can merge into the first
+one instead of creating another live review run. The merged job keeps a
+`tasks` list and `mergedTaskCount`, so the later review prompt still sees the
+full batch context.
 
 ## Codex first
 
