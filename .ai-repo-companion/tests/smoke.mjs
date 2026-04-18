@@ -135,6 +135,73 @@ assert.ok(firstMetrics.cost.estimatedContextTokens > 0);
 assert.equal(firstMetrics.cost.liveTokensUsed, 0);
 assert.ok(firstMetrics.cost.avgEstimatedContextTokensPerRun > 0);
 
+const valueGateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-value-gate-"));
+await fs.cp(path.resolve("config"), path.join(valueGateRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(valueGateRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(valueGateRoot, "state"), { recursive: true });
+await ensureWorkspace(valueGateRoot);
+const valueGateNow = new Date().toISOString();
+
+await writeJson(path.join(valueGateRoot, "state/memory/review-queue.json"), [
+  {
+    id: "memjob-value-gate-1",
+    createdAt: valueGateNow,
+    mode: "balanced",
+    budget: 180,
+    task: "touch one small docs note",
+    domains: ["docs"],
+    reasons: ["Medium-risk task should get a small memory review pass."],
+    sourceEventId: "evt-value-gate-1",
+    sourceNoteId: "100-context-minimization",
+    sourceEventIds: ["evt-value-gate-1"],
+    sourceNoteIds: ["100-context-minimization"],
+    tasks: [
+      {
+        task: "touch one small docs note",
+        reasons: ["Medium-risk task should get a small memory review pass."],
+        sourceEventId: "evt-value-gate-1",
+        sourceNoteId: "100-context-minimization",
+        addedAt: valueGateNow
+      }
+    ],
+    mergedTaskCount: 1,
+    status: "queued"
+  }
+]);
+
+const valueGateRun = await processReviewQueue(valueGateRoot, config, {
+  maxJobs: 1,
+  reviewConfig: {
+    ...config,
+    reviewExecution: {
+      ...config.reviewExecution,
+      valueGate: {
+        enabled: true,
+        applyToModes: ["balanced"],
+        minScore: 999
+      }
+    }
+  }
+});
+
+assert.equal(valueGateRun.processedCount, 1);
+assert.equal(valueGateRun.processed[0].adapter, "value-policy");
+
+const valueGateQueue = await inspectReviewQueue(valueGateRoot);
+assert.equal(valueGateQueue.completed, 1);
+
+const valueGateReport = await readJson(valueGateQueue.jobs[0].reportPath, null);
+assert.equal(valueGateReport.execution.adapter, "value-policy");
+assert.equal(valueGateReport.execution.output.usage.totalTokens, 0);
+assert.equal(valueGateReport.valueGate.shouldSkip, true);
+assert.match(valueGateReport.noteChanges.reason, /value gate/i);
+
+const valueGateMetrics = await summarizeReviewMetrics(valueGateRoot);
+assert.equal(valueGateMetrics.counters.processedJobs, 1);
+assert.equal(valueGateMetrics.counters.skippedJobs, 1);
+assert.equal(valueGateMetrics.cost.liveTokensUsed, 0);
+assert.ok(valueGateMetrics.topAdapters.some((entry) => entry.key === "value-policy"));
+
 const retentionRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-retention-"));
 await fs.mkdir(path.join(retentionRoot, "state/reviews/reports"), { recursive: true });
 const retentionReportsDir = path.join(retentionRoot, "state/reviews/reports");

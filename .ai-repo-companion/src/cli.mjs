@@ -430,6 +430,11 @@ function describeRuntimeReviewConfig(config) {
         codexReasoningEffort: config.reviewExecution?.reviewProfiles?.expensive?.codexReasoningEffort ?? "high"
       }
     },
+    valueGate: {
+      enabled: config.reviewExecution?.valueGate?.enabled !== false,
+      applyToModes: config.reviewExecution?.valueGate?.applyToModes ?? ["balanced"],
+      minScore: config.reviewExecution?.valueGate?.minScore ?? 40
+    },
     operationRanking: {
       maxAppliedOperations: config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2,
       minScore: config.reviewExecution?.operationRanking?.minScore ?? 35
