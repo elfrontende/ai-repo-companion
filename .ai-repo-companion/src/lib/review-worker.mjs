@@ -8,6 +8,11 @@ import { evaluateReviewOperations } from "./review-quality-engine.mjs";
 import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
 import { rankReviewOperations } from "./review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "./review-idempotency-engine.mjs";
+import {
+  beginReviewApplyRecovery,
+  completeReviewApplyRecovery,
+  recoverInterruptedReviewRun
+} from "./review-recovery-engine.mjs";
 
 // The review worker consumes queued memory jobs.
 // It is intentionally separate from the main sync path so background review
@@ -26,6 +31,10 @@ export async function inspectReviewQueue(rootDir) {
 }
 
 export async function processReviewQueue(rootDir, config, options = {}) {
+  // Recovery runs first on every worker invocation.
+  // If the previous process died during note apply, we want to restore notes
+  // before touching the queue again.
+  const recovery = await recoverInterruptedReviewRun(rootDir, config.reviewExecution?.recovery ?? {});
   const queuePath = path.join(rootDir, "state/memory/review-queue.json");
   const policyStatePath = path.join(rootDir, "state/memory/policy-state.json");
   const historyPath = path.join(rootDir, "state/reviews/history.jsonl");
@@ -113,14 +122,47 @@ export async function processReviewQueue(rootDir, config, options = {}) {
       const payload = await buildReviewPayload(rootDir, job, staleness);
       const effectiveConfig = options.reviewConfig ?? config;
       const execution = await executeReviewPayload(rootDir, payload, effectiveConfig);
+      // Persist a pre-apply report before we mutate any note files.
+      // This gives recovery code a stable artifact to update later if the
+      // process crashes in the middle of note application.
+      const pendingReportPath = await persistReviewReport(rootDir, job.id, {
+        job,
+        payload,
+        execution,
+        noteChanges: {
+          applied: [],
+          skipped: [],
+          reason: "Review execution completed. Local note apply has not finished yet."
+        },
+        staleness,
+        recovery: {
+          stage: "pending-apply"
+        }
+      });
+      const recoverySession = await beginReviewApplyRecovery(
+        rootDir,
+        job,
+        pendingReportPath,
+        effectiveConfig.reviewExecution?.recovery ?? {}
+      );
+
       const finishedAt = new Date().toISOString();
       const noteChanges = await maybeApplyReviewOperations(rootDir, execution, effectiveConfig, finishedAt);
+      // Once note apply succeeds, the recovery session can be cleared.
+      // If note apply throws before this point, the session stays on disk and
+      // the next worker run will restore the backup automatically.
+      const recoveryCompletion = await completeReviewApplyRecovery(
+        rootDir,
+        recoverySession,
+        effectiveConfig.reviewExecution?.recovery ?? {}
+      );
       const report = {
         job,
         payload,
         execution,
         noteChanges,
         staleness,
+        recovery: recoveryCompletion,
         finishedAt
       };
       const reportPath = await persistReviewReport(rootDir, job.id, report);
@@ -173,6 +215,7 @@ export async function processReviewQueue(rootDir, config, options = {}) {
   const retention = await applyReviewRetention(rootDir, config.reviewExecution?.retention ?? {});
 
   return {
+    recovery,
     processedCount: processed.length,
     processed,
     retention

@@ -325,6 +325,11 @@ function describeRuntimeReviewConfig(config) {
       enabled: config.reviewExecution?.retention?.enabled !== false,
       maxReportFiles: config.reviewExecution?.retention?.maxReportFiles ?? 25,
       maxHistoryEntries: config.reviewExecution?.retention?.maxHistoryEntries ?? 200
+    },
+    recovery: {
+      enabled: config.reviewExecution?.recovery?.enabled !== false,
+      strategy: config.reviewExecution?.recovery?.strategy ?? "rollback-and-requeue",
+      keepBackups: config.reviewExecution?.recovery?.keepBackups === true
     }
   };
 }

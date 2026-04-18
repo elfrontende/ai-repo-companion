@@ -156,6 +156,14 @@ Review retention is also enabled by default:
 
 This keeps the local review trail bounded without letting report files and history logs grow forever.
 
+Review recovery is enabled by default too:
+
+- before note apply, the worker snapshots the whole `notes/` directory
+- if the process dies during apply, the next worker run restores that backup
+- the interrupted job is put back into `queued` so the review can replay safely
+
+This keeps append-style note updates from being double-applied after a crash or half-finished local write.
+
 ## Codex first
 
 The first native provider path is Codex.
