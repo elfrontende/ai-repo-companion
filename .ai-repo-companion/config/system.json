@@ -1,0 +1,222 @@
+{
+  "workspaceVersion": 1,
+  "hiddenRoot": ".ai-repo-companion",
+  "retrieval": {
+    "defaultTokenBudget": 1200,
+    "maxNotesPerBundle": 6,
+    "preferAtomicNotes": true
+  },
+  "memory": {
+    "workingMemoryMaxEntries": 12,
+    "persistWorkingMemory": "pointers-only",
+    "syncMode": "background-pipeline"
+  },
+  "memoryPolicy": {
+    "defaultMode": "cheap",
+    "balancedTokenBudget": 300,
+    "expensiveTokenBudget": 700,
+    "sameDomainEventThreshold": 3,
+    "duplicateCandidateThreshold": 2,
+    "maxQueuedJobsPerDomain": 2,
+    "hardTriggers": [
+      "migration",
+      "security",
+      "architecture"
+    ],
+    "domainCatalog": {
+      "auth": [
+        "auth",
+        "token",
+        "jwt",
+        "session",
+        "login",
+        "middleware"
+      ],
+      "security": [
+        "security",
+        "secure",
+        "permission",
+        "permissioning",
+        "vulnerability",
+        "безпека",
+        "захист"
+      ],
+      "migration": [
+        "migration",
+        "migrate",
+        "rollout",
+        "compatibility",
+        "backfill",
+        "міграція",
+        "перенесення"
+      ],
+      "testing": [
+        "test",
+        "qa",
+        "regression",
+        "flaky",
+        "assert",
+        "тест",
+        "регрес"
+      ],
+      "docs": [
+        "docs",
+        "documentation",
+        "readme",
+        "guide",
+        "документація",
+        "гайд"
+      ],
+      "api": [
+        "api",
+        "contract",
+        "schema",
+        "endpoint",
+        "protocol"
+      ],
+      "deploy": [
+        "deploy",
+        "deployment",
+        "release",
+        "infra",
+        "ci",
+        "cd",
+        "деплой"
+      ],
+      "ui": [
+        "ui",
+        "ux",
+        "component",
+        "form",
+        "layout",
+        "button"
+      ]
+    }
+  },
+  "reviewExecution": {
+    "defaultAdapter": "dry-run",
+    "maxJobsPerRun": 3,
+    "providerByMode": {
+      "balanced": "codex",
+      "expensive": "codex"
+    },
+    "nativeCodex": {
+      "enabled": false,
+      "model": "",
+      "sandbox": "workspace-write",
+      "extraArgs": []
+    },
+    "commandAdapters": {
+      "claude": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "codex": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "gemini": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "cursor": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      }
+    }
+  },
+  "providers": {
+    "claude": {
+      "defaultModelAlias": "deep",
+      "strengths": [
+        "architecture",
+        "analysis",
+        "documentation"
+      ]
+    },
+    "codex": {
+      "defaultModelAlias": "builder",
+      "strengths": [
+        "implementation",
+        "refactor",
+        "tests"
+      ]
+    },
+    "gemini": {
+      "defaultModelAlias": "scout",
+      "strengths": [
+        "wide-retrieval",
+        "classification",
+        "triage"
+      ]
+    },
+    "cursor": {
+      "defaultModelAlias": "inline",
+      "strengths": [
+        "editor-actions",
+        "small-fixes",
+        "fast-navigation"
+      ]
+    }
+  },
+  "modelAliases": {
+    "deep": {
+      "reasoning": "high",
+      "latency": "medium"
+    },
+    "builder": {
+      "reasoning": "high",
+      "latency": "medium"
+    },
+    "scout": {
+      "reasoning": "medium",
+      "latency": "low"
+    },
+    "inline": {
+      "reasoning": "low",
+      "latency": "low"
+    }
+  },
+  "dynamicAgentTemplates": {
+    "security": {
+      "id": "security-reviewer",
+      "name": "Security Reviewer",
+      "specialty": "security",
+      "preferredProviders": [
+        "claude",
+        "codex"
+      ]
+    },
+    "performance": {
+      "id": "performance-engineer",
+      "name": "Performance Engineer",
+      "specialty": "performance",
+      "preferredProviders": [
+        "codex",
+        "gemini"
+      ]
+    },
+    "migration": {
+      "id": "migration-planner",
+      "name": "Migration Planner",
+      "specialty": "migration",
+      "preferredProviders": [
+        "claude",
+        "codex"
+      ]
+    },
+    "data": {
+      "id": "data-curator",
+      "name": "Data Curator",
+      "specialty": "data",
+      "preferredProviders": [
+        "gemini",
+        "claude"
+      ]
+    }
+  }
+}

@@ -1,0 +1,86 @@
+[
+  {
+    "id": "orchestrator",
+    "name": "Orchestrator",
+    "role": "routing",
+    "systemGoal": "Choose agents, effort, provider strategy, and background memory jobs.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "claude",
+      "gemini"
+    ],
+    "defaultModelAlias": "deep"
+  },
+  {
+    "id": "architect",
+    "name": "Architect",
+    "role": "architecture",
+    "systemGoal": "Design reliable system boundaries, interfaces, and tradeoffs.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "claude",
+      "codex"
+    ],
+    "defaultModelAlias": "deep"
+  },
+  {
+    "id": "implementer",
+    "name": "Implementer",
+    "role": "implementation",
+    "systemGoal": "Ship code changes, refactors, and developer tooling.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "codex",
+      "cursor"
+    ],
+    "defaultModelAlias": "builder"
+  },
+  {
+    "id": "qa",
+    "name": "QA",
+    "role": "verification",
+    "systemGoal": "Check regressions, edge cases, tests, and release safety.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "codex",
+      "gemini"
+    ],
+    "defaultModelAlias": "builder"
+  },
+  {
+    "id": "pm",
+    "name": "PM",
+    "role": "planning",
+    "systemGoal": "Clarify scope, delivery slices, and acceptance criteria.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "claude",
+      "gemini"
+    ],
+    "defaultModelAlias": "scout"
+  },
+  {
+    "id": "docs",
+    "name": "Docs",
+    "role": "documentation",
+    "systemGoal": "Maintain concise, high-signal docs and repo-facing guidance.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "claude",
+      "gemini"
+    ],
+    "defaultModelAlias": "deep"
+  },
+  {
+    "id": "memory-curator",
+    "name": "Memory Curator",
+    "role": "memory",
+    "systemGoal": "Convert task outcomes into atomic notes, links, and pointer-only working memory.",
+    "reuseAcrossChats": true,
+    "preferredProviders": [
+      "gemini",
+      "claude"
+    ],
+    "defaultModelAlias": "scout"
+  }
+]

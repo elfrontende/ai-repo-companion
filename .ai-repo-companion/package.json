@@ -1,0 +1,18 @@
+{
+  "name": "ai-repo-companion",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local hidden workspace for context-minimized AI repo assistance.",
+  "scripts": {
+    "init": "node src/cli.mjs init",
+    "plan": "node src/cli.mjs plan",
+    "policy": "node src/cli.mjs policy",
+    "context": "node src/cli.mjs context",
+    "sync": "node src/cli.mjs sync",
+    "queue": "node src/cli.mjs queue",
+    "review": "node src/cli.mjs review",
+    "demo": "node src/cli.mjs demo",
+    "test": "node tests/smoke.mjs"
+  }
+}

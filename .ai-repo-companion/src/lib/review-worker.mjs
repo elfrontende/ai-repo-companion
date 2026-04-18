@@ -1,0 +1,145 @@
+import path from "node:path";
+import { appendLine, readJson, writeJson } from "./store.mjs";
+import { assembleContext, loadNotes } from "./context-engine.mjs";
+import { executeReviewPayload, persistReviewReport } from "./provider-engine.mjs";
+import { applyReviewOperations } from "./review-note-engine.mjs";
+
+// The review worker consumes queued memory jobs.
+// It is intentionally separate from the main sync path so background review
+// stays visible, inspectable, and easy to throttle.
+
+export async function inspectReviewQueue(rootDir) {
+  const queue = await readJson(path.join(rootDir, "state/memory/review-queue.json"), []);
+  return {
+    total: queue.length,
+    queued: queue.filter((job) => job.status === "queued").length,
+    running: queue.filter((job) => job.status === "running").length,
+    completed: queue.filter((job) => job.status === "completed").length,
+    failed: queue.filter((job) => job.status === "failed").length,
+    jobs: queue
+  };
+}
+
+export async function processReviewQueue(rootDir, config, options = {}) {
+  const queuePath = path.join(rootDir, "state/memory/review-queue.json");
+  const policyStatePath = path.join(rootDir, "state/memory/policy-state.json");
+  const historyPath = path.join(rootDir, "state/reviews/history.jsonl");
+  const queue = await readJson(queuePath, []);
+  const policyState = await readJson(policyStatePath, {
+    domains: {},
+    recentModes: [],
+    lastDecisionAt: null
+  });
+  const maxJobs = Number(options.maxJobs) || config.reviewExecution?.maxJobsPerRun || 3;
+  const runOnlyJobId = options.jobId ?? null;
+  const jobs = queue.filter((job) => job.status === "queued" && (!runOnlyJobId || job.id === runOnlyJobId)).slice(0, maxJobs);
+  const processed = [];
+
+  for (const job of jobs) {
+    job.status = "running";
+    job.startedAt = new Date().toISOString();
+    await writeJson(queuePath, queue);
+
+    try {
+      const payload = await buildReviewPayload(rootDir, job);
+      const execution = await executeReviewPayload(rootDir, payload, config);
+      const finishedAt = new Date().toISOString();
+      const noteChanges = await maybeApplyReviewOperations(rootDir, execution, finishedAt);
+      const report = {
+        job,
+        payload,
+        execution,
+        noteChanges,
+        finishedAt
+      };
+      const reportPath = await persistReviewReport(rootDir, job.id, report);
+
+      job.status = execution.status === "failed" ? "failed" : "completed";
+      job.finishedAt = finishedAt;
+      job.reportPath = reportPath;
+      job.execution = {
+        provider: execution.provider,
+        adapter: execution.adapter,
+        status: execution.status
+      };
+
+      if (job.status === "completed") {
+        releaseQueuedSlots(policyState, job.domains);
+      }
+
+      await appendLine(historyPath, JSON.stringify({
+        id: job.id,
+        at: finishedAt,
+        status: job.status,
+        provider: execution.provider,
+        adapter: execution.adapter,
+        reportPath
+      }));
+
+      processed.push({
+        id: job.id,
+        status: job.status,
+        reportPath,
+        provider: execution.provider,
+        adapter: execution.adapter,
+        noteChanges
+      });
+    } catch (error) {
+      job.status = "failed";
+      job.finishedAt = new Date().toISOString();
+      job.error = error.message;
+      processed.push({
+        id: job.id,
+        status: "failed",
+        error: error.message
+      });
+    }
+
+    await writeJson(queuePath, queue);
+    await writeJson(policyStatePath, policyState);
+  }
+
+  return {
+    processedCount: processed.length,
+    processed
+  };
+}
+
+async function buildReviewPayload(rootDir, job) {
+  // Review jobs use the same bounded retrieval strategy as normal task work.
+  // This prevents the memory maintenance layer from becoming a token sink.
+  const notes = await loadNotes(rootDir);
+  const contextTask = `${job.task} ${job.domains.join(" ")} ${job.mode} memory review`;
+  const contextBundle = assembleContext(contextTask, notes, {
+    tokenBudget: job.budget,
+    maxNotes: 8
+  });
+
+  return {
+    job,
+    contextBundle
+  };
+}
+
+function releaseQueuedSlots(policyState, domains) {
+  for (const domain of domains) {
+    const current = policyState.domains?.[domain];
+    if (!current) {
+      continue;
+    }
+    current.queuedJobs = Math.max(0, (current.queuedJobs ?? 0) - 1);
+  }
+}
+
+async function maybeApplyReviewOperations(rootDir, execution, timestamp) {
+  const operations = execution.output?.parsed?.operations;
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return {
+      applied: [],
+      skipped: [],
+      reason: "Execution produced no structured note operations."
+    };
+  }
+
+  return applyReviewOperations(rootDir, operations, { timestamp });
+}
