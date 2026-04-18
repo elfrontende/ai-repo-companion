@@ -12,13 +12,14 @@ export async function executeReviewPayload(rootDir, payload, config) {
   const provider = pickProvider(payload.job.mode, executionConfig);
   const nativeCodex = executionConfig.nativeCodex ?? {};
   const nativeCursor = executionConfig.nativeCursor ?? {};
+  const reviewProfile = resolveReviewProfile(payload.job.mode, executionConfig);
   const commandConfig = executionConfig.commandAdapters?.[provider];
 
   if (provider === "codex" && nativeCodex.enabled) {
-    return executeNativeCodexAdapter(rootDir, payload, nativeCodex);
+    return executeNativeCodexAdapter(rootDir, payload, nativeCodex, reviewProfile);
   }
   if (provider === "cursor" && nativeCursor.enabled) {
-    return executeNativeCursorAdapter(rootDir, payload, nativeCursor);
+    return executeNativeCursorAdapter(rootDir, payload, nativeCursor, reviewProfile);
   }
 
   const adapter = commandConfig?.enabled ? "command" : executionConfig.defaultAdapter ?? "dry-run";
@@ -27,22 +28,23 @@ export async function executeReviewPayload(rootDir, payload, config) {
     return executeCommandAdapter(rootDir, provider, payload, commandConfig);
   }
 
-  return executeDryRunAdapter(provider, payload);
+  return executeDryRunAdapter(provider, payload, reviewProfile);
 }
 
 function pickProvider(mode, executionConfig) {
   return executionConfig.providerByMode?.[mode] ?? "claude";
 }
 
-async function executeDryRunAdapter(provider, payload) {
+async function executeDryRunAdapter(provider, payload, reviewProfile) {
   return {
     provider,
     adapter: "dry-run",
     status: "prepared",
     output: {
       title: `Prepared ${payload.job.mode} review job for ${provider}`,
-      prompt: buildReviewPrompt(payload),
+      prompt: buildReviewPrompt(payload, reviewProfile),
       contextBundle: payload.contextBundle,
+      reviewProfile,
       usage: {
         totalTokens: null,
         durationMs: 0
@@ -52,15 +54,15 @@ async function executeDryRunAdapter(provider, payload) {
   };
 }
 
-async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
+async function executeNativeCodexAdapter(rootDir, payload, nativeCodex, reviewProfile) {
   // Native Codex integration uses schema-constrained output.
   // This is the safest way to let a real model propose memory edits:
   // the model can only return JSON that matches our operation schema.
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-codex-"));
   const schemaPath = path.join(tempDir, "review-schema.json");
   const outputPath = path.join(tempDir, "review-output.json");
-  const schema = buildCodexOutputSchema();
-  const prompt = buildReviewPrompt(payload);
+  const schema = buildCodexOutputSchema(reviewProfile);
+  const prompt = buildReviewPrompt(payload, reviewProfile);
 
   await fs.writeFile(schemaPath, JSON.stringify(schema, null, 2), "utf8");
 
@@ -80,6 +82,9 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
 
   if (nativeCodex.model) {
     args.splice(1, 0, "--model", nativeCodex.model);
+  }
+  if (reviewProfile.codexReasoningEffort) {
+    args.splice(1, 0, "-c", `model_reasoning_effort="${reviewProfile.codexReasoningEffort}"`);
   }
   if (Array.isArray(nativeCodex.extraArgs) && nativeCodex.extraArgs.length > 0) {
     args.splice(args.length - 1, 0, ...nativeCodex.extraArgs);
@@ -145,6 +150,7 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
       output: {
         args,
         attempts,
+        reviewProfile,
         usage: summarizeAttemptUsage(attempts),
         stdout: lastResult?.stdout?.trim?.() ?? "",
         stderr: lastResult?.stderr?.trim?.() ?? "",
@@ -160,6 +166,7 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
     output: {
       args,
       attempts,
+      reviewProfile,
       usage: summarizeAttemptUsage(attempts),
       raw,
       parsed
@@ -167,11 +174,11 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
   };
 }
 
-async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
+async function executeNativeCursorAdapter(rootDir, payload, nativeCursor, reviewProfile) {
   // Cursor does not currently expose a schema-constrained output flag like Codex.
   // To keep the local apply path safe, we force a strict JSON-only contract
   // in the prompt and then parse the returned text locally.
-  const prompt = buildCursorReviewPrompt(payload);
+  const prompt = buildCursorReviewPrompt(payload, reviewProfile);
   const args = [
     "agent",
     "--print",
@@ -256,6 +263,7 @@ async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
       output: {
         args,
         attempts,
+        reviewProfile,
         usage: summarizeAttemptUsage(attempts),
         stdout: lastResult?.stdout?.trim?.() ?? "",
         stderr: lastResult?.stderr?.trim?.() ?? "",
@@ -271,6 +279,7 @@ async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
     output: {
       args,
       attempts,
+      reviewProfile,
       usage: summarizeAttemptUsage(attempts),
       raw,
       parsed
@@ -308,8 +317,35 @@ async function executeCommandAdapter(rootDir, provider, payload, commandConfig) 
   };
 }
 
-function buildReviewPrompt(payload) {
+function buildReviewPrompt(payload, reviewProfile = {}) {
   const mergedTasks = Array.isArray(payload.job.tasks) ? payload.job.tasks : [];
+  const maxOperations = reviewProfile.maxOperations ?? 3;
+  const promptStyle = reviewProfile.promptStyle ?? "strict";
+
+  if (promptStyle === "light") {
+    return [
+      "You maintain a Zettelkasten memory graph for a repository assistant.",
+      "Return only structured JSON that matches the provided schema.",
+      "Prefer the smallest correct memory update.",
+      "",
+      `Review mode: ${payload.job.mode}`,
+      `Budget: ${payload.job.budget} tokens`,
+      `Task: ${payload.job.task}`,
+      ...(mergedTasks.length > 1
+        ? [`Merged tasks: ${mergedTasks.length}`]
+        : []),
+      "",
+      "Relevant note snippets:",
+      ...payload.contextBundle.selectedNotes.map((note) => `- ${note.id} | ${note.title} | ${note.snippet}`),
+      "",
+      "Rules:",
+      `- Do not propose more than ${maxOperations} operations.`,
+      "- Prefer append_note_update over create_note.",
+      "- Create a new note only when the knowledge is clearly distinct.",
+      "- Keep summaries and signals short.",
+      "- Use existing note ids in links whenever possible."
+    ].join("\n");
+  }
 
   return [
     "You are maintaining a Zettelkasten memory graph for a repository assistant.",
@@ -343,7 +379,7 @@ function buildReviewPrompt(payload) {
     ...payload.contextBundle.selectedNotes.map((note) => `- ${note.id} | ${note.title} | tags=${note.tags.join(", ")} | ${note.snippet}`),
     "",
     "Response rules:",
-    "- Do not propose more than 3 operations.",
+    `- Do not propose more than ${maxOperations} operations.`,
     "- Do not rewrite entire notes.",
     "- linksToAdd and links must use existing note ids when possible.",
     "- signals must be short bullet-ready strings.",
@@ -352,9 +388,9 @@ function buildReviewPrompt(payload) {
   ].join("\n");
 }
 
-function buildCursorReviewPrompt(payload) {
+function buildCursorReviewPrompt(payload, reviewProfile = {}) {
   return [
-    buildReviewPrompt(payload).replace(
+    buildReviewPrompt(payload, reviewProfile).replace(
       "Return only structured JSON that matches the provided schema.",
       "Return exactly one raw JSON object and nothing else. Do not use markdown fences."
     ),
@@ -521,10 +557,11 @@ function extractBalancedJsonObject(text) {
   return "";
 }
 
-function buildCodexOutputSchema() {
+function buildCodexOutputSchema(reviewProfile = {}) {
   // Keep the schema intentionally small.
   // The more operation types we add, the harder it becomes to keep the
   // local apply step understandable and safe for maintenance.
+  const maxOperations = reviewProfile.maxOperations ?? 3;
   return {
     type: "object",
     additionalProperties: false,
@@ -535,7 +572,7 @@ function buildCodexOutputSchema() {
       },
       operations: {
         type: "array",
-        maxItems: 3,
+        maxItems: maxOperations,
         items: {
           type: "object",
           additionalProperties: false,
@@ -607,6 +644,18 @@ function buildCodexOutputSchema() {
         }
       }
     }
+  };
+}
+
+function resolveReviewProfile(mode, executionConfig) {
+  const profiles = executionConfig.reviewProfiles ?? {};
+  const defaults = mode === "balanced"
+    ? { promptStyle: "light", maxOperations: 2, codexReasoningEffort: "medium" }
+    : { promptStyle: "strict", maxOperations: 3, codexReasoningEffort: "high" };
+
+  return {
+    ...defaults,
+    ...(profiles[mode] ?? {})
   };
 }
 

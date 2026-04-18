@@ -175,6 +175,15 @@ Local review observability is enabled by default:
 
 This gives the pipeline enough signal for later tuning without adding any external telemetry dependency.
 
+Balanced live reviews are now intentionally cheaper than expensive ones:
+
+- `balanced` uses a lighter prompt profile
+- `balanced` defaults to fewer operations
+- `balanced` lowers Codex reasoning effort to `medium`
+- `expensive` keeps the stricter prompt and `high` reasoning effort
+
+This separates routine memory cleanup from high-risk architectural review, which is important for real live-token savings.
+
 Daily ergonomics are better now too:
 
 - `node src/cli.mjs status` gives one compact snapshot of queue, worker, metrics, and recovery state
