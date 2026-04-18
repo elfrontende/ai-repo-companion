@@ -124,7 +124,7 @@
     "valueGate": {
       "enabled": true,
       "applyToModes": ["balanced"],
-      "minScore": 40
+      "minScore": 60
     },
     "nativeCursor": {
       "enabled": false,

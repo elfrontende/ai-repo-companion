@@ -189,6 +189,7 @@ Balanced live reviews now also pass through a local value gate:
 
 - the worker scores cheap local signals before it calls a live model
 - weak `balanced` jobs are skipped locally with adapter `value-policy`
+- the default threshold is intentionally conservative, so single-task cleanup runs need stronger clustered signals to justify a live call
 - this avoids paying live tokens for queue entries that only have shallow support
 
 This is the first layer that saves real live cost by reducing the number of model runs, not just shrinking prompt size.
@@ -212,7 +213,7 @@ Policy tuning is now metrics-aware:
 
 - `node src/cli.mjs tune` reads local review metrics and proposes bounded config changes
 - `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`
-- the tuner currently adjusts queue pressure, ranking strictness, apply budget, and approval TTL
+- the tuner currently adjusts queue pressure, ranking strictness, balanced value-gate strictness, apply budget, and approval TTL
 
 This keeps policy iteration lightweight: collect local evidence first, then nudge the config instead of re-guessing thresholds by hand.
 

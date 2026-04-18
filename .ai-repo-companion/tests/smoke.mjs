@@ -569,10 +569,16 @@ await writeJson(path.join(tuningRoot, "state/reviews/metrics.json"), {
     approvalsExpiredClosed: 1,
     recoveredRuns: 0,
     noteApplyRuns: 3,
+    selectedOperations: 3,
     appliedOperations: 3,
     skippedOperations: 2,
     rejectedOperations: 6,
     deferredOperations: 4
+  },
+  cost: {
+    liveTokensUsed: 120000,
+    estimatedContextTokens: 2400,
+    liveRunsWithUsage: 3
   },
   latencies: {
     queueMinutes: {
@@ -602,14 +608,16 @@ await writeJson(path.join(tuningRoot, "state/reviews/metrics.json"), {
 const tuningAnalysis = await analyzePolicyTuning(tuningRoot);
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-domain-threshold"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-ranking-floor"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-value-gate"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-budget"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
-assert.ok(tuningApply.applied.length >= 4);
+assert.ok(tuningApply.applied.length >= 5);
 const tunedConfig = await readJson(path.join(tuningRoot, "config/system.json"), {});
 assert.equal(tunedConfig.memoryPolicy.sameDomainEventThreshold, 4);
 assert.equal(tunedConfig.reviewExecution.operationRanking.minScore, 40);
+assert.equal(tunedConfig.reviewExecution.valueGate.minScore, 65);
 assert.equal(tunedConfig.reviewExecution.operationRanking.maxAppliedOperations, 3);
 assert.equal(tunedConfig.reviewExecution.approval.pendingApprovalTtlMinutes, 300);
 assert.equal(tunedConfig.reviewExecution.approval.onExpired, "requeue");
