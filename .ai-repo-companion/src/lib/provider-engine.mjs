@@ -153,7 +153,9 @@ function buildReviewPrompt(payload) {
     "- Do not propose more than 3 operations.",
     "- Do not rewrite entire notes.",
     "- linksToAdd and links must use existing note ids when possible.",
-    "- signals must be short bullet-ready strings."
+    "- signals must be short bullet-ready strings.",
+    "- Every operation object must include every schema key.",
+    "- When a field does not apply, use an empty string for text fields and [] for list fields."
   ].join("\n");
 }
 
@@ -208,7 +210,20 @@ function buildCodexOutputSchema() {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["type", "summary"],
+          required: [
+            "type",
+            "noteId",
+            "sourceNoteId",
+            "targetNoteId",
+            "title",
+            "kind",
+            "summary",
+            "signals",
+            "tagsToAdd",
+            "linksToAdd",
+            "tags",
+            "links"
+          ],
           properties: {
             type: {
               type: "string",
@@ -218,11 +233,26 @@ function buildCodexOutputSchema() {
                 "create_note"
               ]
             },
-            noteId: { type: "string" },
-            sourceNoteId: { type: "string" },
-            targetNoteId: { type: "string" },
-            title: { type: "string" },
-            kind: { type: "string" },
+            noteId: {
+              type: "string",
+              description: "Existing target note id for append_note_update. Use an empty string when not needed."
+            },
+            sourceNoteId: {
+              type: "string",
+              description: "Source note id for merge_note_into_existing. Use an empty string when not needed."
+            },
+            targetNoteId: {
+              type: "string",
+              description: "Target note id for merge_note_into_existing. Use an empty string when not needed."
+            },
+            title: {
+              type: "string",
+              description: "Title for create_note. Use an empty string when not needed."
+            },
+            kind: {
+              type: "string",
+              description: "Note kind for create_note. Use an empty string when not needed."
+            },
             summary: { type: "string" },
             signals: {
               type: "array",
