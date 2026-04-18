@@ -131,6 +131,14 @@ Supported structured operations today:
 
 The model does not edit note files directly. It only proposes structured operations, and local code applies them. This is safer and easier to debug than letting an LLM write free-form Markdown into the note graph.
 
+Important Codex detail:
+
+- the output schema now requires every operation key to be present
+- unused text fields must be returned as `""`
+- unused list fields must be returned as `[]`
+
+This looks verbose, but it matches the current Codex JSON schema requirements and keeps live runs stable.
+
 Example config:
 
 ```json

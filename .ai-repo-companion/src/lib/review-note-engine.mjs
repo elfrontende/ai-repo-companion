@@ -17,6 +17,15 @@ export async function applyReviewOperations(rootDir, operations, options = {}) {
   let createdCount = 0;
 
   for (const operation of operations ?? []) {
+    const validated = validateOperation(operation);
+    if (!validated.ok) {
+      skipped.push({
+        type: operation?.type ?? "unknown",
+        reason: validated.reason
+      });
+      continue;
+    }
+
     if (operation.type === "append_note_update") {
       const target = noteById.get(operation.noteId);
       if (!target) {
@@ -189,6 +198,41 @@ async function createReviewNote(rootDir, operation, timestamp = new Date().toISO
   return { noteId, filePath };
 }
 
+function validateOperation(operation) {
+  // Codex output schema requires every key to exist, even when the field is
+  // not relevant for the chosen operation type. Because of that, the local
+  // apply layer must normalize empty placeholders and reject incomplete
+  // operations before they touch the note graph.
+  if (!operation || typeof operation !== "object") {
+    return { ok: false, reason: "Operation must be an object." };
+  }
+
+  if (normalizeString(operation.type) === "") {
+    return { ok: false, reason: "Operation type is missing." };
+  }
+
+  if (normalizeString(operation.summary) === "") {
+    return { ok: false, reason: "Operation summary is missing." };
+  }
+
+  if (operation.type === "append_note_update" && normalizeString(operation.noteId) === "") {
+    return { ok: false, reason: "append_note_update requires noteId." };
+  }
+
+  if (
+    operation.type === "merge_note_into_existing"
+    && (normalizeString(operation.sourceNoteId) === "" || normalizeString(operation.targetNoteId) === "")
+  ) {
+    return { ok: false, reason: "merge_note_into_existing requires sourceNoteId and targetNoteId." };
+  }
+
+  if (operation.type === "create_note" && normalizeString(operation.title) === "") {
+    return { ok: false, reason: "create_note requires title." };
+  }
+
+  return { ok: true };
+}
+
 function normalizeArray(value) {
   if (!value) {
     return [];
@@ -198,4 +242,8 @@ function normalizeArray(value) {
 
 function uniqueList(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeString(value) {
+  return typeof value === "string" ? value.trim() : "";
 }

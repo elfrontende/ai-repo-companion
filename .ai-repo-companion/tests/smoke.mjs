@@ -146,6 +146,27 @@ const mergeResult = await applyReviewOperations(tempRoot, [
 
 assert.equal(mergeResult.applied.length, 1);
 
+const invalidResult = await applyReviewOperations(tempRoot, [
+  {
+    type: "create_note",
+    noteId: "",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "   ",
+    kind: "",
+    summary: "This operation should be skipped because the title is blank.",
+    signals: [],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: [],
+    links: []
+  }
+], { timestamp: "2026-04-18T01:30:00.000Z" });
+
+assert.equal(invalidResult.applied.length, 0);
+assert.equal(invalidResult.skipped.length, 1);
+assert.match(invalidResult.skipped[0].reason, /requires title/);
+
 const notesAfterMerge = await loadNotes(tempRoot);
 const mergeTarget = notesAfterMerge.find((note) => note.id === "z-130-background-memory-sync");
 assert.ok(mergeTarget.body.includes("Review Merge"));
