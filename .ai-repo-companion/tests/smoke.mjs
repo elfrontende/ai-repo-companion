@@ -605,20 +605,49 @@ await writeJson(path.join(tuningRoot, "state/reviews/metrics.json"), {
   },
   recentEvents: []
 });
+await writeJson(path.join(tuningRoot, "state/benchmarks/last-benchmark.json"), {
+  generatedAt: "2026-04-18T04:10:00.000Z",
+  aggregate: {
+    taskCount: 5,
+    cheapestVariant: "saver",
+    byVariant: {
+      saver: {
+        totalTokens: 4200,
+        tokensSaved: 3800,
+        reductionPercent: 47.5
+      },
+      balanced: {
+        totalTokens: 4900,
+        tokensSaved: 3100,
+        reductionPercent: 38.75
+      },
+      strict: {
+        totalTokens: 6100,
+        tokensSaved: 1900,
+        reductionPercent: 23.75
+      }
+    }
+  }
+});
 
 const tuningAnalysis = await analyzePolicyTuning(tuningRoot);
+assert.equal(tuningAnalysis.summary.benchmarkLoaded, true);
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-domain-threshold"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-ranking-floor"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-value-gate"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "benchmark-lower-balanced-effort"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "benchmark-lean-balanced-operations"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-budget"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
-assert.ok(tuningApply.applied.length >= 5);
+assert.ok(tuningApply.applied.length >= 6);
 const tunedConfig = await readJson(path.join(tuningRoot, "config/system.json"), {});
 assert.equal(tunedConfig.memoryPolicy.sameDomainEventThreshold, 4);
 assert.equal(tunedConfig.reviewExecution.operationRanking.minScore, 40);
 assert.equal(tunedConfig.reviewExecution.valueGate.minScore, 65);
+assert.equal(tunedConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "low");
+assert.equal(tunedConfig.reviewExecution.reviewProfiles.balanced.maxOperations, 1);
 assert.equal(tunedConfig.reviewExecution.operationRanking.maxAppliedOperations, 3);
 assert.equal(tunedConfig.reviewExecution.approval.pendingApprovalTtlMinutes, 300);
 assert.equal(tunedConfig.reviewExecution.approval.onExpired, "requeue");
