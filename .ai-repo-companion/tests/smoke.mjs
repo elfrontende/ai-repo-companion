@@ -9,7 +9,7 @@ import { planAgents } from "../src/lib/agent-engine.mjs";
 import { assembleContext, loadNotes } from "../src/lib/context-engine.mjs";
 import { syncMemory } from "../src/lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "../src/lib/policy-engine.mjs";
-import { inspectReviewQueue, processReviewQueue } from "../src/lib/review-worker.mjs";
+import { applyReviewRetention, inspectReviewQueue, processReviewQueue } from "../src/lib/review-worker.mjs";
 import { applyReviewOperations } from "../src/lib/review-note-engine.mjs";
 import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
 import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
@@ -106,6 +106,42 @@ assert.ok(reviewReport.execution.output.prompt.includes("Review mode: expensive"
 
 const historyRaw = await fs.readFile(path.join(tempRoot, "state/reviews/history.jsonl"), "utf8");
 assert.ok(historyRaw.includes("\"adapter\":\"dry-run\""));
+
+const retentionRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-retention-"));
+await fs.mkdir(path.join(retentionRoot, "state/reviews/reports"), { recursive: true });
+const retentionReportsDir = path.join(retentionRoot, "state/reviews/reports");
+await fs.writeFile(path.join(retentionReportsDir, "memjob-20260418000000001.json"), JSON.stringify({ id: "oldest" }, null, 2));
+await fs.writeFile(path.join(retentionReportsDir, "memjob-20260418000000002.json"), JSON.stringify({ id: "middle" }, null, 2));
+await fs.writeFile(path.join(retentionReportsDir, "memjob-20260418000000003.json"), JSON.stringify({ id: "newest" }, null, 2));
+await fs.writeFile(
+  path.join(retentionRoot, "state/reviews/history.jsonl"),
+  ["one", "two", "three", "four"].join("\n") + "\n"
+);
+
+const retentionResult = await applyReviewRetention(retentionRoot, {
+  enabled: true,
+  maxReportFiles: 2,
+  maxHistoryEntries: 3
+});
+
+assert.equal(retentionResult.enabled, true);
+assert.equal(retentionResult.deletedReportCount, 1);
+assert.equal(retentionResult.trimmedHistoryEntries, 1);
+assert.equal(retentionResult.remainingReportCount, 2);
+assert.equal(retentionResult.remainingHistoryEntries, 3);
+
+const retainedReports = (await fs.readdir(retentionReportsDir))
+  .filter((entry) => entry.endsWith(".json"))
+  .sort();
+assert.deepEqual(retainedReports, [
+  "memjob-20260418000000002.json",
+  "memjob-20260418000000003.json"
+]);
+
+const retainedHistory = (await fs.readFile(path.join(retentionRoot, "state/reviews/history.jsonl"), "utf8"))
+  .trim()
+  .split("\n");
+assert.deepEqual(retainedHistory, ["two", "three", "four"]);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

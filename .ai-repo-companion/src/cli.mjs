@@ -320,6 +320,11 @@ function describeRuntimeReviewConfig(config) {
       staleAfterMinutes: config.reviewExecution?.staleJobs?.staleAfterMinutes ?? 60,
       maxAgeMinutes: config.reviewExecution?.staleJobs?.maxAgeMinutes ?? 240,
       skipExpired: config.reviewExecution?.staleJobs?.skipExpired !== false
+    },
+    retention: {
+      enabled: config.reviewExecution?.retention?.enabled !== false,
+      maxReportFiles: config.reviewExecution?.retention?.maxReportFiles ?? 25,
+      maxHistoryEntries: config.reviewExecution?.retention?.maxHistoryEntries ?? 200
     }
   };
 }

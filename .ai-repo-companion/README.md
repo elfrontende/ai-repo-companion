@@ -148,6 +148,14 @@ Stale-job policy is also enabled by default:
 
 This reduces the chance of paying for review runs whose original queue reasons are no longer trustworthy.
 
+Review retention is also enabled by default:
+
+- old JSON reports in `state/reviews/reports/` are trimmed by count
+- old lines in `state/reviews/history.jsonl` are trimmed by count
+- current queue items are not touched, so retention only limits past execution artifacts
+
+This keeps the local review trail bounded without letting report files and history logs grow forever.
+
 ## Codex first
 
 The first native provider path is Codex.
