@@ -33,7 +33,7 @@ import {
   recoverInterruptedReviewRun
 } from "../src/lib/review-recovery-engine.mjs";
 import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
-import { analyzePolicyTuning, applyPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
+import { analyzePolicyTuning, applyPolicyTuning, runAutoPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
 import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
@@ -651,6 +651,103 @@ assert.equal(tunedConfig.reviewExecution.reviewProfiles.balanced.maxOperations, 
 assert.equal(tunedConfig.reviewExecution.operationRanking.maxAppliedOperations, 3);
 assert.equal(tunedConfig.reviewExecution.approval.pendingApprovalTtlMinutes, 300);
 assert.equal(tunedConfig.reviewExecution.approval.onExpired, "requeue");
+
+const autoTuneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-auto-tune-"));
+await fs.cp(path.resolve("config"), path.join(autoTuneRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(autoTuneRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(autoTuneRoot, "state"), { recursive: true });
+await ensureWorkspace(autoTuneRoot);
+await writeJson(path.join(autoTuneRoot, "state/reviews/metrics.json"), {
+  schemaVersion: 1,
+  updatedAt: "2026-04-18T04:00:00.000Z",
+  counters: {
+    processedJobs: 8,
+    completedJobs: 7,
+    failedJobs: 1,
+    skippedJobs: 0,
+    awaitingApprovalJobs: 2,
+    approvalsApplied: 1,
+    approvalsExpiredRequeued: 2,
+    approvalsExpiredClosed: 1,
+    recoveredRuns: 0,
+    noteApplyRuns: 3,
+    selectedOperations: 3,
+    appliedOperations: 3,
+    skippedOperations: 2,
+    rejectedOperations: 6,
+    deferredOperations: 4
+  },
+  cost: {
+    liveTokensUsed: 120000,
+    estimatedContextTokens: 2400,
+    liveRunsWithUsage: 3
+  },
+  latencies: {
+    queueMinutes: {
+      count: 8,
+      total: 480,
+      max: 90,
+      last: 75
+    },
+    approvalMinutes: {
+      count: 3,
+      total: 390,
+      max: 180,
+      last: 150
+    }
+  },
+  byAdapter: {
+    "codex-native": 3,
+    "dry-run": 5
+  },
+  byMode: {
+    balanced: 3,
+    expensive: 5
+  },
+  recentEvents: []
+});
+await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"), {
+  generatedAt: "2026-04-18T04:10:00.000Z",
+  aggregate: {
+    taskCount: 5,
+    cheapestVariant: "saver",
+    byVariant: {
+      saver: {
+        totalTokens: 4200,
+        tokensSaved: 3800,
+        reductionPercent: 47.5
+      },
+      balanced: {
+        totalTokens: 4900,
+        tokensSaved: 3100,
+        reductionPercent: 38.75
+      },
+      strict: {
+        totalTokens: 6100,
+        tokensSaved: 1900,
+        reductionPercent: 23.75
+      }
+    }
+  }
+});
+
+const autoTuningFirst = await runAutoPolicyTuning(autoTuneRoot);
+assert.equal(autoTuningFirst.enabled, true);
+assert.ok(autoTuningFirst.applied.length >= 3);
+assert.ok(autoTuningFirst.applied.some((item) => item.id === "tighten-value-gate"));
+assert.ok(autoTuningFirst.applied.some((item) => item.id === "benchmark-lower-balanced-effort"));
+const autoTunedConfig = await readJson(path.join(autoTuneRoot, "config/system.json"), {});
+assert.equal(autoTunedConfig.reviewExecution.valueGate.minScore, 65);
+assert.equal(autoTunedConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "low");
+
+const autoTuneState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-tune-state.json"), {});
+assert.ok(autoTuneState.lastAppliedById["tighten-value-gate"]);
+const autoTuneHistory = await fs.readFile(path.join(autoTuneRoot, "state/tuning/history.jsonl"), "utf8");
+assert.match(autoTuneHistory, /benchmark-lower-balanced-effort/);
+
+const autoTuningSecond = await runAutoPolicyTuning(autoTuneRoot);
+assert.equal(autoTuningSecond.applied.length, 0);
+assert.ok(autoTuningSecond.blocked.some((item) => item.id === "tighten-value-gate"));
 
 const lockRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-lock-"));
 await fs.cp(path.resolve("config"), path.join(lockRoot, "config"), { recursive: true });

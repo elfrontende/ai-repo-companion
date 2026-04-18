@@ -291,5 +291,18 @@
         "claude"
       ]
     }
+  },
+  "tuning": {
+    "autoApplyEnabled": true,
+    "cooldownMinutes": 720,
+    "historyRetentionEntries": 100,
+    "autoApplySuggestionIds": [
+      "raise-domain-threshold",
+      "tighten-ranking-floor",
+      "tighten-value-gate",
+      "relax-value-gate",
+      "benchmark-lower-balanced-effort",
+      "benchmark-lean-balanced-operations"
+    ]
   }
 }

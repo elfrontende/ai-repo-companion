@@ -217,6 +217,7 @@ Policy tuning is now metrics-aware:
 
 - `node src/cli.mjs tune` reads local review metrics and proposes bounded config changes
 - `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`
+- `node src/cli.mjs tune --auto` applies only the narrower allowlisted suggestions, respects a cooldown, and records local tuning history in `state/tuning/`
 - the tuner currently adjusts queue pressure, ranking strictness, balanced value-gate strictness, apply budget, approval TTL, and selected balanced-lane cost settings
 - if `state/benchmarks/last-benchmark.json` exists, the tuner also compares `saver` vs `balanced` synthetic cost and can recommend lowering balanced reasoning effort or shrinking balanced max operations
 
