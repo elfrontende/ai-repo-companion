@@ -33,6 +33,7 @@ import {
   recoverInterruptedReviewRun
 } from "../src/lib/review-recovery-engine.mjs";
 import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
+import { analyzePolicyTuning, applyPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -474,6 +475,70 @@ const approvalExpiryHistoryRaw = await fs.readFile(approvalExpireHistoryPath, "u
 assert.match(approvalExpiryHistoryRaw, /"adapter":"approval-expiry-policy"/);
 const expireExpiryMetrics = await summarizeReviewMetrics(approvalExpiryExpireRoot);
 assert.equal(expireExpiryMetrics.counters.approvalsExpiredClosed, 1);
+
+const tuningRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-tuning-"));
+await fs.cp(path.resolve("config"), path.join(tuningRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(tuningRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(tuningRoot, "state"), { recursive: true });
+await ensureWorkspace(tuningRoot);
+await writeJson(path.join(tuningRoot, "state/reviews/metrics.json"), {
+  schemaVersion: 1,
+  updatedAt: "2026-04-18T04:00:00.000Z",
+  counters: {
+    processedJobs: 8,
+    completedJobs: 7,
+    failedJobs: 1,
+    skippedJobs: 0,
+    awaitingApprovalJobs: 2,
+    approvalsApplied: 1,
+    approvalsExpiredRequeued: 2,
+    approvalsExpiredClosed: 1,
+    recoveredRuns: 0,
+    noteApplyRuns: 3,
+    appliedOperations: 3,
+    skippedOperations: 2,
+    rejectedOperations: 6,
+    deferredOperations: 4
+  },
+  latencies: {
+    queueMinutes: {
+      count: 8,
+      total: 480,
+      max: 90,
+      last: 75
+    },
+    approvalMinutes: {
+      count: 3,
+      total: 390,
+      max: 180,
+      last: 150
+    }
+  },
+  byAdapter: {
+    "codex-native": 3,
+    "dry-run": 5
+  },
+  byMode: {
+    balanced: 3,
+    expensive: 5
+  },
+  recentEvents: []
+});
+
+const tuningAnalysis = await analyzePolicyTuning(tuningRoot);
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-domain-threshold"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-ranking-floor"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-budget"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
+
+const tuningApply = await applyPolicyTuning(tuningRoot);
+assert.ok(tuningApply.applied.length >= 4);
+const tunedConfig = await readJson(path.join(tuningRoot, "config/system.json"), {});
+assert.equal(tunedConfig.memoryPolicy.sameDomainEventThreshold, 4);
+assert.equal(tunedConfig.reviewExecution.operationRanking.minScore, 40);
+assert.equal(tunedConfig.reviewExecution.operationRanking.maxAppliedOperations, 3);
+assert.equal(tunedConfig.reviewExecution.approval.pendingApprovalTtlMinutes, 300);
+assert.equal(tunedConfig.reviewExecution.approval.onExpired, "requeue");
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

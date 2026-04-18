@@ -36,6 +36,8 @@ npm run task -- --task "design a migration-safe auth refactor" --summary "Split 
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow --live
 npm run queue
 npm run metrics
+npm run tune
+npm run tune -- --apply
 npm run review -- --maxJobs 1
 npm run worker -- --maxJobs 1
 npm test
@@ -166,6 +168,14 @@ Local review observability is enabled by default:
 - `node src/cli.mjs metrics` prints a compact local summary for policy tuning
 
 This gives the pipeline enough signal for later tuning without adding any external telemetry dependency.
+
+Policy tuning is now metrics-aware:
+
+- `node src/cli.mjs tune` reads local review metrics and proposes bounded config changes
+- `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`
+- the tuner currently adjusts queue pressure, ranking strictness, apply budget, and approval TTL
+
+This keeps policy iteration lightweight: collect local evidence first, then nudge the config instead of re-guessing thresholds by hand.
 
 Review recovery is enabled by default too:
 
