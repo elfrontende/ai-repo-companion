@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "updatedAt": null,
   "counters": {
     "processedJobs": 0,
@@ -12,10 +12,16 @@
     "approvalsExpiredClosed": 0,
     "recoveredRuns": 0,
     "noteApplyRuns": 0,
+    "selectedOperations": 0,
     "appliedOperations": 0,
     "skippedOperations": 0,
     "rejectedOperations": 0,
     "deferredOperations": 0
+  },
+  "cost": {
+    "liveTokensUsed": 0,
+    "estimatedContextTokens": 0,
+    "liveRunsWithUsage": 0
   },
   "latencies": {
     "queueMinutes": {
@@ -33,5 +39,9 @@
   },
   "byAdapter": {},
   "byMode": {},
+  "byDomain": {},
+  "tokensByAdapter": {},
+  "tokensByMode": {},
+  "tokensByDomain": {},
   "recentEvents": []
 }

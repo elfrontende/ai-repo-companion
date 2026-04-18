@@ -158,10 +158,13 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         at: finishedAt,
         jobId: job.id,
         mode: job.mode,
+        domains: job.domains,
         createdAt: job.createdAt,
         finishedAt,
         status: job.status,
         adapter: "stale-policy",
+        payload: report.payload,
+        execution: report.execution,
         noteChanges: report.noteChanges
       });
 
@@ -316,10 +319,13 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         at: finishedAt,
         jobId: job.id,
         mode: job.mode,
+        domains: job.domains,
         createdAt: job.createdAt,
         finishedAt,
         status: job.status,
         adapter: execution.adapter,
+        payload,
+        execution,
         noteChanges
       });
     } catch (error) {
@@ -336,10 +342,19 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         at: job.finishedAt,
         jobId: job.id,
         mode: job.mode,
+        domains: job.domains,
         createdAt: job.createdAt,
         finishedAt: job.finishedAt,
         status: "failed",
         adapter: job.execution?.adapter ?? "unknown",
+        execution: {
+          output: {
+            usage: {
+              totalTokens: 0,
+              durationMs: 0
+            }
+          }
+        },
         noteChanges: {
           applied: [],
           skipped: [],

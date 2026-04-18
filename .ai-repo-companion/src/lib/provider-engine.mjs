@@ -43,6 +43,10 @@ async function executeDryRunAdapter(provider, payload) {
       title: `Prepared ${payload.job.mode} review job for ${provider}`,
       prompt: buildReviewPrompt(payload),
       contextBundle: payload.contextBundle,
+      usage: {
+        totalTokens: null,
+        durationMs: 0
+      },
       suggestedNextStep: "Configure a real command adapter when you are ready to call an external AI."
     }
   };
@@ -101,7 +105,8 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
       attempt,
       stdout: result.stdout.trim(),
       stderr: result.stderr.trim(),
-      exitCode: result.code
+      exitCode: result.code,
+      durationMs: result.durationMs
     };
 
     if (result.code === 0) {
@@ -140,6 +145,7 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
       output: {
         args,
         attempts,
+        usage: summarizeAttemptUsage(attempts),
         stdout: lastResult?.stdout?.trim?.() ?? "",
         stderr: lastResult?.stderr?.trim?.() ?? "",
         exitCode: lastResult?.code ?? 1
@@ -154,6 +160,7 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
     output: {
       args,
       attempts,
+      usage: summarizeAttemptUsage(attempts),
       raw,
       parsed
     }
@@ -209,7 +216,8 @@ async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
       attempt,
       stdout: result.stdout.trim(),
       stderr: result.stderr.trim(),
-      exitCode: result.code
+      exitCode: result.code,
+      durationMs: result.durationMs
     };
 
     if (result.code === 0) {
@@ -248,6 +256,7 @@ async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
       output: {
         args,
         attempts,
+        usage: summarizeAttemptUsage(attempts),
         stdout: lastResult?.stdout?.trim?.() ?? "",
         stderr: lastResult?.stderr?.trim?.() ?? "",
         exitCode: lastResult?.code ?? 1
@@ -262,6 +271,7 @@ async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
     output: {
       args,
       attempts,
+      usage: summarizeAttemptUsage(attempts),
       raw,
       parsed
     }
@@ -283,6 +293,14 @@ async function executeCommandAdapter(rootDir, provider, payload, commandConfig) 
     output: {
       command: commandConfig.command,
       args,
+      usage: summarizeAttemptUsage([{
+        attempt: 1,
+        stdout: result.stdout.trim(),
+        stderr: result.stderr.trim(),
+        exitCode: result.code,
+        durationMs: result.durationMs,
+        status: result.code === 0 ? "completed" : "failed"
+      }]),
       stdout: result.stdout.trim(),
       stderr: result.stderr.trim(),
       exitCode: result.code
@@ -376,6 +394,7 @@ function interpolateArg(arg, payload, provider) {
 
 function runCommand(command, args, stdinBody, cwd) {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const child = spawn(command, args, {
       cwd,
       stdio: ["pipe", "pipe", "pipe"]
@@ -392,12 +411,34 @@ function runCommand(command, args, stdinBody, cwd) {
     });
     child.on("error", reject);
     child.on("close", (code) => {
-      resolve({ code, stdout, stderr });
+      resolve({
+        code,
+        stdout,
+        stderr,
+        durationMs: Date.now() - startedAt
+      });
     });
 
     child.stdin.write(stdinBody);
     child.stdin.end();
   });
+}
+
+function summarizeAttemptUsage(attempts) {
+  const totalTokens = attempts.reduce((sum, attempt) => sum + (extractTokenUsageFromText(attempt.stdout) ?? 0) + (extractTokenUsageFromText(attempt.stderr) ?? 0), 0);
+  const durationMs = attempts.reduce((sum, attempt) => sum + (Number(attempt.durationMs) || 0), 0);
+  return {
+    totalTokens: totalTokens > 0 ? totalTokens : null,
+    durationMs
+  };
+}
+
+function extractTokenUsageFromText(text) {
+  if (!text) {
+    return null;
+  }
+  const match = text.match(/tokens used\s+([\d,]+)/i);
+  return match ? Number(match[1].replaceAll(",", "")) : null;
 }
 
 function sleep(ms) {
