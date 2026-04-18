@@ -778,8 +778,13 @@ const benchmarkResult = await runSyntheticBenchmark(
 assert.equal(benchmarkResult.report.tasks.length, 5);
 assert.ok(benchmarkResult.report.aggregate.tokensSaved > 0);
 assert.ok(benchmarkResult.report.tasks.some((task) => task.savings.tokensSaved > 0));
+assert.equal(benchmarkResult.report.aggregate.cheapestVariant, "saver");
+assert.ok(benchmarkResult.report.aggregate.byVariant.saver.totalTokens <= benchmarkResult.report.aggregate.byVariant.strict.totalTokens);
+assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.saver));
+assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.strict));
 const benchmarkReport = await readJson(path.join(benchmarkRoot, "state/benchmarks/last-benchmark.json"), null);
 assert.equal(benchmarkReport.aggregate.taskCount, 5);
+assert.ok(benchmarkReport.aggregate.byVariant.balanced.totalTokens > 0);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

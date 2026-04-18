@@ -3,6 +3,8 @@ import { loadNotes, assembleContext } from "./context-engine.mjs";
 import { classifyTask } from "./task-engine.mjs";
 import { evaluateMemoryPolicy } from "./policy-engine.mjs";
 import { appendLine, writeJson } from "./store.mjs";
+import { applyReviewCostMode } from "./review-cost-mode-engine.mjs";
+import { assessReviewValueGate } from "./review-value-gate-engine.mjs";
 
 const defaultBenchmarkTasks = [
   {
@@ -32,6 +34,12 @@ const defaultBenchmarkTasks = [
   }
 ];
 
+const benchmarkVariants = [
+  { id: "saver", costMode: "saver", reviewProfile: "light" },
+  { id: "balanced", costMode: "balanced", reviewProfile: "auto" },
+  { id: "strict", costMode: "strict", reviewProfile: "heavy" }
+];
+
 export async function runSyntheticBenchmark(rootDir, config) {
   const notes = augmentWithNoiseNotes(await loadNotes(rootDir));
   const allNoteTokens = notes.reduce((total, note) => total + note.tokenEstimate, 0);
@@ -39,53 +47,36 @@ export async function runSyntheticBenchmark(rootDir, config) {
   const taskResults = [];
 
   for (const sample of defaultBenchmarkTasks) {
-    const taskProfile = classifyTask(sample.task);
-    const memoryPolicy = await evaluateMemoryPolicy(rootDir, taskProfile, config);
-    const context = assembleContext(sample.task, notes, {
-      tokenBudget: config.retrieval?.defaultTokenBudget ?? 1200,
-      maxNotes: config.retrieval?.maxNotesPerBundle ?? 6
-    });
-    const reviewQueued = Boolean(memoryPolicy.shouldQueueReview);
-    const systemReviewTokens = reviewQueued ? memoryPolicy.reviewBudget ?? 0 : 0;
-    const baselineReviewTokens = reviewQueued ? allNoteTokens : 0;
-    const systemTotal = context.usedTokens;
-    const baselineTotal = allNoteTokens;
+    const baseline = buildBaselineBenchmark(sample, allNoteTokens, allNoteCount);
+    const variants = {};
+
+    for (const variant of benchmarkVariants) {
+      variants[variant.id] = await buildVariantBenchmark(rootDir, config, notes, sample, variant);
+    }
 
     taskResults.push({
       id: sample.id,
       difficulty: sample.difficulty,
       task: sample.task,
-      mode: memoryPolicy.mode,
-      reviewQueued,
-      withSystem: {
-        selectedNotes: context.selectedNotes.length,
-        contextTokens: context.usedTokens,
-        reviewTokens: systemReviewTokens,
-        totalTokens: systemTotal
-      },
-      baseline: {
-        selectedNotes: allNoteCount,
-        contextTokens: allNoteTokens,
-        reviewTokens: baselineReviewTokens,
-        totalTokens: baselineTotal
-      },
+      mode: variants.balanced.mode,
+      reviewQueued: variants.balanced.reviewQueued,
+      withSystem: variants.balanced,
+      baseline,
+      variants,
       savings: {
-        tokensSaved: baselineTotal - systemTotal,
-        reductionPercent: baselineTotal > 0
-          ? Number((((baselineTotal - systemTotal) / baselineTotal) * 100).toFixed(2))
+        tokensSaved: baseline.totalTokens - variants.balanced.totalTokens,
+        reductionPercent: baseline.totalTokens > 0
+          ? Number((((baseline.totalTokens - variants.balanced.totalTokens) / baseline.totalTokens) * 100).toFixed(2))
           : 0
       },
-      reviewComparison: {
-        reviewQueued,
-        withSystemReviewTokens: systemReviewTokens,
-        baselineReviewTokens
-      }
+      profileSavings: buildProfileSavings(variants, baseline)
     });
   }
 
   const aggregate = aggregateBenchmarkResults(taskResults);
   const report = {
     generatedAt: new Date().toISOString(),
+    variants: benchmarkVariants,
     tasks: taskResults,
     aggregate
   };
@@ -101,6 +92,93 @@ export async function runSyntheticBenchmark(rootDir, config) {
     reportPath,
     report
   };
+}
+
+async function buildVariantBenchmark(rootDir, config, notes, sample, variant) {
+  const variantConfig = applyReviewCostMode(config, variant);
+  const taskProfile = classifyTask(sample.task);
+  const memoryPolicy = await evaluateMemoryPolicy(rootDir, taskProfile, variantConfig);
+  const context = assembleContext(sample.task, notes, {
+    tokenBudget: variantConfig.retrieval?.defaultTokenBudget ?? 1200,
+    maxNotes: variantConfig.retrieval?.maxNotesPerBundle ?? 6
+  });
+  const reviewQueued = Boolean(memoryPolicy.shouldQueueReview);
+  const valueGatePayload = {
+    job: {
+      mode: memoryPolicy.mode,
+      mergedTaskCount: 1,
+      domains: memoryPolicy.domains,
+      reasons: memoryPolicy.reasons,
+      sourceEventIds: ["evt-synthetic-benchmark-1"]
+    },
+    contextBundle: context
+  };
+  const valueGate = reviewQueued
+    ? assessReviewValueGate(
+      valueGatePayload.job,
+      valueGatePayload,
+      variantConfig.reviewExecution?.valueGate ?? {}
+    )
+    : null;
+  const reviewProfile = reviewQueued && !valueGate?.shouldSkip
+    ? resolveBenchmarkReviewProfile(memoryPolicy.mode, variantConfig.reviewExecution)
+    : null;
+  const estimatedLiveReviewTokens = reviewQueued && !valueGate?.shouldSkip
+    ? estimateLiveReviewTokens(context.usedTokens, reviewProfile, memoryPolicy.mode)
+    : 0;
+
+  return {
+    costMode: variant.costMode,
+    reviewProfile: variant.reviewProfile,
+    mode: memoryPolicy.mode,
+    reviewQueued,
+    selectedNotes: context.selectedNotes.length,
+    contextTokens: context.usedTokens,
+    reviewPath: reviewQueued
+      ? (valueGate?.shouldSkip ? "value-policy" : `live-${reviewProfile.promptStyle}`)
+      : "not-queued",
+    estimatedLiveReviewTokens,
+    totalTokens: context.usedTokens + estimatedLiveReviewTokens,
+    valueGateScore: valueGate?.score ?? null,
+    valueGateSkipped: Boolean(valueGate?.shouldSkip),
+    reasoningEffort: reviewProfile?.codexReasoningEffort ?? null,
+    maxOperations: reviewProfile?.maxOperations ?? 0
+  };
+}
+
+function buildBaselineBenchmark(sample, allNoteTokens, allNoteCount) {
+  const taskProfile = classifyTask(sample.task);
+  const reviewQueued = taskProfile.effort !== "low";
+  const estimatedLiveReviewTokens = reviewQueued
+    ? estimateLiveReviewTokens(allNoteTokens, {
+      promptStyle: "strict",
+      codexReasoningEffort: "high",
+      maxOperations: 3
+    }, taskProfile.risk === "high" ? "expensive" : "balanced")
+    : 0;
+
+  return {
+    selectedNotes: allNoteCount,
+    contextTokens: allNoteTokens,
+    reviewQueued,
+    reviewPath: reviewQueued ? "live-strict-full-context" : "not-queued",
+    estimatedLiveReviewTokens,
+    totalTokens: allNoteTokens + estimatedLiveReviewTokens
+  };
+}
+
+function buildProfileSavings(variants, baseline) {
+  return Object.fromEntries(
+    Object.entries(variants).map(([key, variant]) => [
+      key,
+      {
+        tokensSaved: baseline.totalTokens - variant.totalTokens,
+        reductionPercent: baseline.totalTokens > 0
+          ? Number((((baseline.totalTokens - variant.totalTokens) / baseline.totalTokens) * 100).toFixed(2))
+          : 0
+      }
+    ])
+  );
 }
 
 function augmentWithNoiseNotes(notes) {
@@ -120,18 +198,57 @@ function augmentWithNoiseNotes(notes) {
 
 function aggregateBenchmarkResults(taskResults) {
   const baselineTokens = taskResults.reduce((total, item) => total + item.baseline.totalTokens, 0);
-  const systemTokens = taskResults.reduce((total, item) => total + item.withSystem.totalTokens, 0);
+  const byVariant = {};
+
+  for (const variant of benchmarkVariants) {
+    const totalTokens = taskResults.reduce((total, item) => total + item.variants[variant.id].totalTokens, 0);
+    byVariant[variant.id] = {
+      totalTokens,
+      tokensSaved: baselineTokens - totalTokens,
+      reductionPercent: baselineTokens > 0
+        ? Number((((baselineTokens - totalTokens) / baselineTokens) * 100).toFixed(2))
+        : 0
+    };
+  }
 
   return {
     taskCount: taskResults.length,
     baselineTotalTokens: baselineTokens,
-    systemTotalTokens: systemTokens,
-    tokensSaved: baselineTokens - systemTokens,
-    reductionPercent: baselineTokens > 0
-      ? Number((((baselineTokens - systemTokens) / baselineTokens) * 100).toFixed(2))
-      : 0,
+    systemTotalTokens: byVariant.balanced.totalTokens,
+    tokensSaved: byVariant.balanced.tokensSaved,
+    reductionPercent: byVariant.balanced.reductionPercent,
     averageReductionPercent: Number((
       taskResults.reduce((total, item) => total + item.savings.reductionPercent, 0) / taskResults.length
-    ).toFixed(2))
+    ).toFixed(2)),
+    byVariant,
+    cheapestVariant: Object.entries(byVariant)
+      .sort((left, right) => left[1].totalTokens - right[1].totalTokens)[0]?.[0] ?? "balanced"
   };
+}
+
+function resolveBenchmarkReviewProfile(mode, executionConfig = {}) {
+  const profiles = executionConfig.reviewProfiles ?? {};
+  return mode === "expensive"
+    ? {
+      promptStyle: profiles.expensive?.promptStyle ?? "strict",
+      codexReasoningEffort: profiles.expensive?.codexReasoningEffort ?? "high",
+      maxOperations: profiles.expensive?.maxOperations ?? 3
+    }
+    : {
+      promptStyle: profiles.balanced?.promptStyle ?? "light",
+      codexReasoningEffort: profiles.balanced?.codexReasoningEffort ?? "medium",
+      maxOperations: profiles.balanced?.maxOperations ?? 2
+    };
+}
+
+function estimateLiveReviewTokens(contextTokens, reviewProfile, mode) {
+  const promptOverhead = reviewProfile.promptStyle === "strict" ? 340 : 180;
+  const reasoningOverhead = reviewProfile.codexReasoningEffort === "high"
+    ? 620
+    : reviewProfile.codexReasoningEffort === "low"
+      ? 140
+      : 280;
+  const modeOverhead = mode === "expensive" ? 180 : 60;
+  const operationOverhead = Math.max(1, Number(reviewProfile.maxOperations) || 1) * 80;
+  return contextTokens + promptOverhead + reasoningOverhead + modeOverhead + operationOverhead;
 }
