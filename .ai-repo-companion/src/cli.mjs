@@ -307,7 +307,8 @@ function describeRuntimeReviewConfig(config) {
       minScore: config.reviewExecution?.operationRanking?.minScore ?? 35
     },
     idempotency: {
-      minSimilarityScore: config.reviewExecution?.idempotency?.minSimilarityScore ?? 7
+      minSimilarityScore: config.reviewExecution?.idempotency?.minSimilarityScore ?? 7,
+      rewriteDuplicatesToAppendUpdate: config.reviewExecution?.idempotency?.rewriteDuplicatesToAppendUpdate !== false
     }
   };
 }
