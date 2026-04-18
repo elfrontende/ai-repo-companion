@@ -233,6 +233,28 @@ assert.ok(normalizationResult.changes.length >= 2);
 const gateAfterNormalization = await evaluateReviewOperations(tempRoot, normalizationResult.normalized);
 assert.equal(gateAfterNormalization.passed, true);
 
+const semanticGuardResult = await evaluateReviewOperations(tempRoot, [
+  {
+    type: "append_note_update",
+    noteId: "z-000-index",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "",
+    kind: "",
+    summary: "Add a self-link to the index note even though this should be blocked.",
+    signals: ["This should fail because self-links are noise."],
+    tagsToAdd: ["auth"],
+    linksToAdd: ["z-000-index"],
+    tags: [],
+    links: []
+  }
+]);
+
+assert.equal(semanticGuardResult.passed, false);
+assert.equal(semanticGuardResult.accepted.length, 0);
+assert.equal(semanticGuardResult.rejected.length, 1);
+assert.match(semanticGuardResult.rejected[0].reason, /self-link/i);
+
 const notesAfterMerge = await loadNotes(tempRoot);
 const mergeTarget = notesAfterMerge.find((note) => note.id === "z-130-background-memory-sync");
 assert.ok(mergeTarget.body.includes("Review Merge"));
