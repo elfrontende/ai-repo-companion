@@ -96,6 +96,8 @@ Useful commands:
 node src/cli.mjs queue
 node src/cli.mjs review --maxJobs 2
 node src/cli.mjs review --jobId memjob-20260418120000000
+node src/cli.mjs review --jobId memjob-20260418120000000 --live
+node src/cli.mjs review --jobId memjob-20260418120000000 --live --model gpt-5.4
 ```
 
 By default, the worker uses the `dry-run` adapter. That means:
@@ -143,6 +145,14 @@ Example config:
 ```
 
 Leave `model` empty to use your Codex CLI default, or set it explicitly if you want a dedicated review model.
+
+For one-off runs, you do not need to edit the config file. The CLI supports an ephemeral live mode:
+
+```bash
+node src/cli.mjs review --jobId memjob-20260418120000000 --live
+```
+
+That command temporarily forces the current review run through native Codex, but does not rewrite `system.json`.
 
 ## Connecting other providers
 

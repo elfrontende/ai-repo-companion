@@ -130,14 +130,18 @@ async function runQueue() {
 }
 
 async function runReview(args) {
+  const reviewConfig = buildRuntimeReviewConfig(systemConfig, args);
+
   return {
     rootDir,
     mode: "review",
     result: await processReviewQueue(rootDir, systemConfig, {
       maxJobs: args.maxJobs,
-      jobId: args.jobId
+      jobId: args.jobId,
+      reviewConfig
     }),
-    queue: await inspectReviewQueue(rootDir)
+    queue: await inspectReviewQueue(rootDir),
+    runtimeReviewConfig: describeRuntimeReviewConfig(reviewConfig)
   };
 }
 
@@ -202,8 +206,49 @@ function helpText() {
       "node src/cli.mjs sync --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\"",
       "node src/cli.mjs queue",
       "node src/cli.mjs review --maxJobs 1",
+      "node src/cli.mjs review --jobId memjob-123 --live",
+      "node src/cli.mjs review --jobId memjob-123 --live --model gpt-5.4",
       "node src/cli.mjs demo --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\""
     ]
+  };
+}
+
+function buildRuntimeReviewConfig(baseConfig, args) {
+  // CLI review overrides must stay ephemeral.
+  // We never mutate system.json here because "run this one job live" should
+  // not silently change the repository's default execution policy.
+  const config = JSON.parse(JSON.stringify(baseConfig));
+  const execution = config.reviewExecution ?? {};
+
+  if (!args.live) {
+    return config;
+  }
+
+  execution.providerByMode = {
+    ...(execution.providerByMode ?? {}),
+    balanced: "codex",
+    expensive: "codex"
+  };
+  execution.nativeCodex = {
+    ...(execution.nativeCodex ?? {}),
+    enabled: true
+  };
+
+  if (args.model) {
+    execution.nativeCodex.model = args.model;
+  }
+
+  config.reviewExecution = execution;
+  return config;
+}
+
+function describeRuntimeReviewConfig(config) {
+  return {
+    providerByMode: config.reviewExecution?.providerByMode ?? {},
+    nativeCodex: {
+      enabled: config.reviewExecution?.nativeCodex?.enabled ?? false,
+      model: config.reviewExecution?.nativeCodex?.model ?? ""
+    }
   };
 }
 

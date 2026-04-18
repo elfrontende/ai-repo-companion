@@ -42,7 +42,8 @@ export async function processReviewQueue(rootDir, config, options = {}) {
 
     try {
       const payload = await buildReviewPayload(rootDir, job);
-      const execution = await executeReviewPayload(rootDir, payload, config);
+      const effectiveConfig = options.reviewConfig ?? config;
+      const execution = await executeReviewPayload(rootDir, payload, effectiveConfig);
       const finishedAt = new Date().toISOString();
       const noteChanges = await maybeApplyReviewOperations(rootDir, execution, finishedAt);
       const report = {
