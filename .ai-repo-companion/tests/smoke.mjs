@@ -9,7 +9,13 @@ import { planAgents } from "../src/lib/agent-engine.mjs";
 import { assembleContext, loadNotes } from "../src/lib/context-engine.mjs";
 import { syncMemory } from "../src/lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "../src/lib/policy-engine.mjs";
-import { applyReviewRetention, inspectReviewQueue, processReviewQueue } from "../src/lib/review-worker.mjs";
+import {
+  applyReviewRetention,
+  approvePendingReview,
+  inspectReviewQueue,
+  planReviewNoteChanges,
+  processReviewQueue
+} from "../src/lib/review-worker.mjs";
 import { applyReviewOperations } from "../src/lib/review-note-engine.mjs";
 import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
 import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
@@ -17,6 +23,10 @@ import { evaluateReviewOperations } from "../src/lib/review-quality-engine.mjs";
 import { normalizeReviewOperations } from "../src/lib/review-normalization-engine.mjs";
 import { rankReviewOperations } from "../src/lib/review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "../src/lib/review-idempotency-engine.mjs";
+import {
+  assessReviewApprovalRequirement,
+  createApprovalRequest
+} from "../src/lib/review-approval-engine.mjs";
 import {
   beginReviewApplyRecovery,
   recoverInterruptedReviewRun
@@ -212,6 +222,120 @@ assert.match(recoveredReport.noteChanges.reason, /interrupted/i);
 
 const recoveryHistoryRaw = await fs.readFile(recoveryHistoryPath, "utf8");
 assert.match(recoveryHistoryRaw, /"adapter":"recovery-policy"/);
+
+const approvalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-approval-"));
+await fs.cp(path.resolve("config"), path.join(approvalRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(approvalRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(approvalRoot, "state"), { recursive: true });
+await ensureWorkspace(approvalRoot);
+
+const approvalConfig = await readJson(path.join(approvalRoot, "config/system.json"), {});
+const approvalJob = {
+  id: "memjob-approval-1",
+  createdAt: "2026-04-18T03:00:00.000Z",
+  mode: "expensive",
+  domains: ["security", "auth", "migration"],
+  reasons: ["Synthetic approval test."],
+  status: "awaiting-approval"
+};
+const approvalExecution = {
+  output: {
+    parsed: {
+      summary: "Prepare a security-sensitive note update for manual approval.",
+      operations: [
+        {
+          type: "append_note_update",
+          noteId: "z-130-background-memory-sync",
+          sourceNoteId: "",
+          targetNoteId: "",
+          title: "",
+          kind: "",
+          summary: "Security-sensitive review updates should stop at a suggest-only gate until a human approves the final write.",
+          signals: [
+            "Use suggest-only mode for security-heavy review runs",
+            "Require an explicit approval step before local note apply"
+          ],
+          tagsToAdd: ["approval-policy", "security-review"],
+          linksToAdd: ["z-120-agent-orchestration"],
+          tags: [],
+          links: []
+        }
+      ]
+    }
+  }
+};
+
+const approvalPlan = await planReviewNoteChanges(approvalRoot, approvalExecution, approvalConfig, approvalJob);
+assert.equal(approvalPlan.shouldApply, true);
+assert.equal(approvalPlan.selectedOperations.length, 1);
+
+const approvalDecision = assessReviewApprovalRequirement(
+  approvalJob,
+  approvalConfig.reviewExecution?.approval ?? {}
+);
+assert.equal(approvalDecision.required, true);
+assert.ok(approvalDecision.reasons.includes("mode:expensive"));
+assert.ok(approvalDecision.reasons.includes("domain:security"));
+
+const approvalReportPath = path.join(approvalRoot, "state/reviews/reports/memjob-approval-1.json");
+await writeJson(approvalReportPath, {
+  job: approvalJob,
+  noteChanges: {
+    ...approvalPlan,
+    approval: {
+      status: "pending",
+      reasons: approvalDecision.reasons
+    },
+    applied: [],
+    reason: "Synthetic pending approval report."
+  }
+});
+await writeJson(path.join(approvalRoot, "state/memory/review-queue.json"), [
+  {
+    ...approvalJob,
+    reportPath: approvalReportPath,
+    approval: {
+      status: "pending"
+    }
+  }
+]);
+
+const createdApproval = await createApprovalRequest(
+  approvalRoot,
+  approvalJob,
+  approvalReportPath,
+  approvalPlan,
+  approvalDecision
+);
+assert.equal(createdApproval.request.selectedOperations.length, 1);
+
+const approvalQueueBeforeApply = await inspectReviewQueue(approvalRoot);
+assert.equal(approvalQueueBeforeApply.awaitingApproval, 1);
+
+const approvalNotePath = path.join(approvalRoot, "notes/130-background-memory-sync.md");
+const approvalBefore = await fs.readFile(approvalNotePath, "utf8");
+const approvalResult = await approvePendingReview(approvalRoot, approvalJob.id, approvalConfig);
+assert.equal(approvalResult.status, "approved");
+
+const approvalAfter = await fs.readFile(approvalNotePath, "utf8");
+assert.notEqual(approvalAfter, approvalBefore);
+assert.match(approvalAfter, /suggest-only gate/i);
+
+const approvalQueueAfterApply = await readJson(path.join(approvalRoot, "state/memory/review-queue.json"), []);
+assert.equal(approvalQueueAfterApply[0].status, "completed");
+assert.equal(approvalQueueAfterApply[0].approval.status, "approved");
+
+const approvalReport = await readJson(approvalReportPath, null);
+assert.equal(approvalReport.noteChanges.approval.status, "approved");
+assert.match(approvalReport.noteChanges.reason, /approved and applied/i);
+
+const approvalHistoryRaw = await fs.readFile(path.join(approvalRoot, "state/reviews/history.jsonl"), "utf8");
+assert.match(approvalHistoryRaw, /"adapter":"approval-policy"/);
+
+await fs.access(createdApproval.approvalPath).then(
+  () => Promise.reject(new Error("Approval file should be removed after apply.")),
+  () => Promise.resolve()
+);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

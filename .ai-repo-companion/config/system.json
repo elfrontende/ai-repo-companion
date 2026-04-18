@@ -132,6 +132,12 @@
       "maxReportFiles": 25,
       "maxHistoryEntries": 200
     },
+    "approval": {
+      "enabled": true,
+      "strategy": "suggest-only",
+      "requireForModes": ["expensive"],
+      "requireForDomains": ["security"]
+    },
     "recovery": {
       "enabled": true,
       "strategy": "rollback-and-requeue",

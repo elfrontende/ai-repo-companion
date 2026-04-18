@@ -123,6 +123,7 @@ node src/cli.mjs review --maxJobs 2
 node src/cli.mjs review --jobId memjob-20260418120000000
 node src/cli.mjs review --jobId memjob-20260418120000000 --live
 node src/cli.mjs review --jobId memjob-20260418120000000 --live --model gpt-5.4
+node src/cli.mjs approve --jobId memjob-20260418120000000
 node src/cli.mjs worker --maxJobs 1
 node src/cli.mjs worker --loop --intervalSeconds 30 --stopWhenEmpty
 ```
@@ -163,6 +164,15 @@ Review recovery is enabled by default too:
 - the interrupted job is put back into `queued` so the review can replay safely
 
 This keeps append-style note updates from being double-applied after a crash or half-finished local write.
+
+Review approval is now enabled by default for sensitive runs:
+
+- `expensive` review jobs stop in `suggest-only` mode by default
+- any job that touches the `security` domain also stops before local note apply
+- the worker writes a pending approval file to `state/reviews/approvals/`
+- a human can then run `approve --jobId ...` to apply the already-ranked operations through the same recovery-safe path
+
+This gives high-risk review runs a manual checkpoint without losing the rest of the automated Codex-first pipeline.
 
 ## Codex first
 

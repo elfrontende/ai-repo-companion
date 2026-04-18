@@ -7,7 +7,7 @@ import { planAgents } from "./lib/agent-engine.mjs";
 import { assembleContext, loadNotes } from "./lib/context-engine.mjs";
 import { syncMemory } from "./lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "./lib/policy-engine.mjs";
-import { inspectReviewQueue, processReviewQueue } from "./lib/review-worker.mjs";
+import { approvePendingReview, inspectReviewQueue, processReviewQueue } from "./lib/review-worker.mjs";
 import { getWorkerState, runReviewWorker } from "./lib/review-runner.mjs";
 import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 
@@ -57,6 +57,9 @@ switch (command) {
     break;
   case "review":
     output(await runReview(args));
+    break;
+  case "approve":
+    output(await runApprove(args));
     break;
   case "worker":
     output(await runWorker(args));
@@ -192,6 +195,21 @@ async function runWorker(args) {
   };
 }
 
+async function runApprove(args) {
+  if (!args.jobId) {
+    output({ error: "Missing required flag --jobId" }, false);
+    process.exitCode = 1;
+    process.exit();
+  }
+
+  return {
+    rootDir,
+    mode: "approve",
+    result: await approvePendingReview(rootDir, args.jobId, systemConfig),
+    queue: await inspectReviewQueue(rootDir)
+  };
+}
+
 async function runDemo(args) {
   const plan = await runPlan(args.task);
   const context = await runContext(args.task, Number(args.budget) || systemConfig.retrieval?.defaultTokenBudget || 1200);
@@ -257,6 +275,7 @@ function helpText() {
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",
       "node src/cli.mjs review --jobId memjob-123 --live --model gpt-5.4",
+      "node src/cli.mjs approve --jobId memjob-123",
       "node src/cli.mjs worker --maxJobs 1",
       "node src/cli.mjs worker --loop --intervalSeconds 30 --stopWhenEmpty",
       "node src/cli.mjs demo --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\""
@@ -325,6 +344,12 @@ function describeRuntimeReviewConfig(config) {
       enabled: config.reviewExecution?.retention?.enabled !== false,
       maxReportFiles: config.reviewExecution?.retention?.maxReportFiles ?? 25,
       maxHistoryEntries: config.reviewExecution?.retention?.maxHistoryEntries ?? 200
+    },
+    approval: {
+      enabled: config.reviewExecution?.approval?.enabled !== false,
+      strategy: config.reviewExecution?.approval?.strategy ?? "suggest-only",
+      requireForModes: config.reviewExecution?.approval?.requireForModes ?? ["expensive"],
+      requireForDomains: config.reviewExecution?.approval?.requireForDomains ?? ["security"]
     },
     recovery: {
       enabled: config.reviewExecution?.recovery?.enabled !== false,

@@ -29,6 +29,7 @@ export async function ensureWorkspace(rootDir) {
     "state/agents",
     "state/memory",
     "state/reviews",
+    "state/reviews/approvals",
     "state/reviews/recovery",
     "state/reviews/reports",
     "src",
