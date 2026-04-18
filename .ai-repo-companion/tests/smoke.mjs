@@ -77,7 +77,7 @@ const sync = await syncMemory(
 assert.ok(sync.eventId.startsWith("evt-"));
 assert.ok(sync.touchedNoteId.startsWith("z-task-") || sync.touchedNoteId.startsWith("z-"));
 
-const policyOutcome = await applyMemoryPolicyOutcome(tempRoot, memoryPolicy, taskProfile, sync);
+const policyOutcome = await applyMemoryPolicyOutcome(tempRoot, memoryPolicy, taskProfile, sync, config);
 assert.ok(policyOutcome.queuedJob);
 assert.equal(policyOutcome.queuedJob.mode, "expensive");
 
@@ -404,22 +404,56 @@ assert.equal(deprecatedSource.kind, "deprecated");
 assert.ok(deprecatedSource.tags.includes("deprecated"));
 assert.ok(deprecatedSource.links.includes("z-130-background-memory-sync"));
 
-const secondSync = await syncMemory(
+const compactTaskOne = "design an auth migration review queue compaction pass";
+const compactTaskTwo = "design a follow-up auth migration review queue compaction pass";
+const compactProfileOne = classifyTask(compactTaskOne);
+const compactProfileTwo = classifyTask(compactTaskTwo);
+const compactDecisionOne = await evaluateMemoryPolicy(tempRoot, compactProfileOne, config);
+const compactDecisionTwo = await evaluateMemoryPolicy(tempRoot, compactProfileTwo, config);
+
+const compactSyncOne = await syncMemory(
   tempRoot,
   {
-    task: "design a follow-up auth migration review",
-    summary: "Queue another review job for the automatic runner.",
-    artifacts: ["runner"]
+    task: compactTaskOne,
+    summary: "Queue the first review job that should become the compaction anchor.",
+    artifacts: ["runner", "compaction"]
   },
   config
 );
-await applyMemoryPolicyOutcome(tempRoot, memoryPolicy, taskProfile, secondSync);
+const compactOutcomeOne = await applyMemoryPolicyOutcome(tempRoot, compactDecisionOne, compactProfileOne, compactSyncOne, config);
+
+const compactSyncTwo = await syncMemory(
+  tempRoot,
+  {
+    task: compactTaskTwo,
+    summary: "Queue the second similar review job so the queue can compact it into the first one.",
+    artifacts: ["runner", "compaction", "follow-up"]
+  },
+  config
+);
+const compactOutcomeTwo = await applyMemoryPolicyOutcome(tempRoot, compactDecisionTwo, compactProfileTwo, compactSyncTwo, config);
+
+assert.equal(compactOutcomeOne.queuedJob.id, compactOutcomeTwo.queuedJob.id);
+
+const compactedQueue = await readJson(path.join(tempRoot, "state/memory/review-queue.json"), []);
+const queuedCompactedJobs = compactedQueue.filter((job) => job.status === "queued");
+assert.equal(queuedCompactedJobs.length, 1);
+assert.equal(queuedCompactedJobs[0].mergedTaskCount, 2);
+assert.equal(queuedCompactedJobs[0].tasks.length, 2);
+assert.equal(queuedCompactedJobs[0].sourceEventIds.length, 2);
+assert.equal(queuedCompactedJobs[0].compaction.mergeCount, 1);
 
 const runnerResult = await runReviewWorker(tempRoot, config, {
   maxJobs: 1
 });
 assert.equal(runnerResult.mode, "once");
 assert.equal(runnerResult.processedCount, 1);
+
+const compactedReport = await readJson(runnerResult.processed[0].reportPath, null);
+assert.equal(compactedReport.payload.job.mergedTaskCount, 2);
+assert.match(compactedReport.execution.output.prompt, /Merged tasks in this review job: 2/);
+assert.match(compactedReport.execution.output.prompt, /design an auth migration review queue compaction pass/);
+assert.match(compactedReport.execution.output.prompt, /design a follow-up auth migration review queue compaction pass/);
 
 const workerState = await getWorkerState(tempRoot);
 assert.equal(workerState.status, "idle");

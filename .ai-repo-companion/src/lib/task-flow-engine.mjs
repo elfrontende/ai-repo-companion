@@ -36,7 +36,7 @@ export async function runTaskFlow(rootDir, config, options = {}) {
     },
     config
   );
-  const policyOutcome = await applyMemoryPolicyOutcome(rootDir, memoryPolicy, taskProfile, syncResult);
+  const policyOutcome = await applyMemoryPolicyOutcome(rootDir, memoryPolicy, taskProfile, syncResult, config);
 
   const result = {
     taskProfile,

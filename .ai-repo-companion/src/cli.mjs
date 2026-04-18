@@ -118,7 +118,7 @@ async function runSync(args) {
     },
     systemConfig
   );
-  const policyOutcome = await applyMemoryPolicyOutcome(rootDir, memoryPolicy, taskProfile, syncResult);
+  const policyOutcome = await applyMemoryPolicyOutcome(rootDir, memoryPolicy, taskProfile, syncResult, systemConfig);
 
   return {
     rootDir,
@@ -309,6 +309,11 @@ function describeRuntimeReviewConfig(config) {
     idempotency: {
       minSimilarityScore: config.reviewExecution?.idempotency?.minSimilarityScore ?? 7,
       rewriteDuplicatesToAppendUpdate: config.reviewExecution?.idempotency?.rewriteDuplicatesToAppendUpdate !== false
+    },
+    queueCompaction: {
+      enabled: config.reviewExecution?.queueCompaction?.enabled !== false,
+      maxTasksPerJob: config.reviewExecution?.queueCompaction?.maxTasksPerJob ?? 3,
+      mergeWindowMinutes: config.reviewExecution?.queueCompaction?.mergeWindowMinutes ?? 30
     }
   };
 }

@@ -78,7 +78,7 @@ export async function evaluateMemoryPolicy(rootDir, taskProfile, config) {
   };
 }
 
-export async function applyMemoryPolicyOutcome(rootDir, decision, taskProfile, syncResult) {
+export async function applyMemoryPolicyOutcome(rootDir, decision, taskProfile, syncResult, config = {}) {
   const policyStatePath = path.join(rootDir, "state/memory/policy-state.json");
   const queuePath = path.join(rootDir, "state/memory/review-queue.json");
   const policyState = await readJson(policyStatePath, defaultPolicyState());
@@ -114,7 +114,7 @@ export async function applyMemoryPolicyOutcome(rootDir, decision, taskProfile, s
 
   let queuedJob = null;
   if (decision.shouldQueueReview && decision.mode !== "cheap" && decision.domains.length > 0) {
-    queuedJob = {
+    const candidateJob = {
       id: `memjob-${now.replace(/[-:.TZ]/g, "")}`,
       createdAt: now,
       mode: decision.mode,
@@ -124,13 +124,32 @@ export async function applyMemoryPolicyOutcome(rootDir, decision, taskProfile, s
       reasons: decision.reasons,
       sourceEventId: syncResult.eventId,
       sourceNoteId: syncResult.touchedNoteId,
+      sourceEventIds: [syncResult.eventId],
+      sourceNoteIds: [syncResult.touchedNoteId],
+      tasks: [
+        {
+          task: taskProfile.task,
+          reasons: decision.reasons,
+          sourceEventId: syncResult.eventId,
+          sourceNoteId: syncResult.touchedNoteId,
+          addedAt: now
+        }
+      ],
+      mergedTaskCount: 1,
       status: "queued"
     };
-    queue.unshift(queuedJob);
 
-    for (const domain of decision.domains) {
-      const current = policyState.domains[domain];
-      current.queuedJobs += 1;
+    const compaction = compactQueuedJob(queue, candidateJob, config.reviewExecution?.queueCompaction ?? {});
+    if (compaction.merged) {
+      queuedJob = compaction.job;
+    } else {
+      queuedJob = candidateJob;
+      queue.unshift(queuedJob);
+
+      for (const domain of decision.domains) {
+        const current = policyState.domains[domain];
+        current.queuedJobs += 1;
+      }
     }
   }
 
@@ -184,4 +203,69 @@ function defaultPolicyState() {
     recentModes: [],
     lastDecisionAt: null
   };
+}
+
+function compactQueuedJob(queue, candidateJob, config) {
+  const compactionConfig = {
+    enabled: config.enabled !== false,
+    maxTasksPerJob: Math.max(1, Number(config.maxTasksPerJob) || 3),
+    mergeWindowMinutes: Math.max(1, Number(config.mergeWindowMinutes) || 30)
+  };
+
+  if (!compactionConfig.enabled) {
+    return { merged: false, job: candidateJob, config: compactionConfig };
+  }
+
+  const candidateCreatedAt = Date.parse(candidateJob.createdAt);
+  const mergeWindowMs = compactionConfig.mergeWindowMinutes * 60 * 1000;
+
+  const target = queue.find((job) => {
+    if (job.status !== "queued") {
+      return false;
+    }
+    if (job.mode !== candidateJob.mode) {
+      return false;
+    }
+    if (!hasDomainOverlap(job.domains, candidateJob.domains)) {
+      return false;
+    }
+    const existingTasks = Array.isArray(job.tasks) && job.tasks.length > 0 ? job.tasks : [job];
+    if (existingTasks.length >= compactionConfig.maxTasksPerJob) {
+      return false;
+    }
+    const createdAt = Date.parse(job.createdAt);
+    return Number.isFinite(createdAt) && Math.abs(candidateCreatedAt - createdAt) <= mergeWindowMs;
+  });
+
+  if (!target) {
+    return { merged: false, job: candidateJob, config: compactionConfig };
+  }
+
+  target.budget = Math.max(Number(target.budget) || 0, Number(candidateJob.budget) || 0);
+  target.domains = uniqueList([...(target.domains ?? []), ...(candidateJob.domains ?? [])]);
+  target.reasons = uniqueList([...(target.reasons ?? []), ...(candidateJob.reasons ?? [])]);
+  target.sourceEventIds = uniqueList([...(target.sourceEventIds ?? []), ...(candidateJob.sourceEventIds ?? [])]);
+  target.sourceNoteIds = uniqueList([...(target.sourceNoteIds ?? []), ...(candidateJob.sourceNoteIds ?? [])]);
+  target.tasks = [...(target.tasks ?? []), ...(candidateJob.tasks ?? [])];
+  target.mergedTaskCount = target.tasks.length;
+  target.lastCompactedAt = candidateJob.createdAt;
+  target.compaction = {
+    enabled: true,
+    mergeCount: (target.compaction?.mergeCount ?? 0) + 1,
+    lastMergedTask: candidateJob.task
+  };
+
+  return {
+    merged: true,
+    job: target,
+    config: compactionConfig
+  };
+}
+
+function hasDomainOverlap(leftDomains = [], rightDomains = []) {
+  return leftDomains.some((domain) => rightDomains.includes(domain));
+}
+
+function uniqueList(values) {
+  return [...new Set(values.filter(Boolean))];
 }
