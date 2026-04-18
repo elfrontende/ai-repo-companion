@@ -14,6 +14,7 @@ import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning } from "./lib/policy-tuning-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.mjs";
 import { runSyntheticBenchmark } from "./lib/benchmark-engine.mjs";
+import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -332,6 +333,8 @@ function helpText() {
       "node src/cli.mjs sync --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\"",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --reviewNow --live --costMode saver",
+      "node src/cli.mjs review --jobId memjob-123 --live --costMode strict --reviewProfile heavy",
       "node src/cli.mjs task --task \"capture auth rollout learnings\" --summary \"Collapsed duplicate auth notes\" --artifacts \"notes,worker\" --reviewNow --live --provider cursor",
       "node src/cli.mjs queue",
       "node src/cli.mjs status",
@@ -356,7 +359,10 @@ function buildRuntimeReviewConfig(baseConfig, args) {
   // CLI review overrides must stay ephemeral.
   // We never mutate system.json here because "run this one job live" should
   // not silently change the repository's default execution policy.
-  const config = JSON.parse(JSON.stringify(baseConfig));
+  const config = applyReviewCostMode(baseConfig, {
+    costMode: args.costMode,
+    reviewProfile: args.reviewProfile
+  });
   const execution = config.reviewExecution ?? {};
 
   if (!args.live) {
@@ -399,6 +405,10 @@ function buildRuntimeReviewConfig(baseConfig, args) {
 
 function describeRuntimeReviewConfig(config) {
   return {
+    runtimeCostControls: config.runtimeCostControls ?? {
+      costMode: "balanced",
+      reviewProfile: "auto"
+    },
     providerByMode: config.reviewExecution?.providerByMode ?? {},
     nativeCodex: {
       enabled: config.reviewExecution?.nativeCodex?.enabled ?? false,
