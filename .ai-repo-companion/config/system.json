@@ -136,7 +136,9 @@
       "enabled": true,
       "strategy": "suggest-only",
       "requireForModes": ["expensive"],
-      "requireForDomains": ["security"]
+      "requireForDomains": ["security"],
+      "pendingApprovalTtlMinutes": 240,
+      "onExpired": "requeue"
     },
     "recovery": {
       "enabled": true,

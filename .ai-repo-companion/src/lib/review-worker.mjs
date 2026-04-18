@@ -9,6 +9,7 @@ import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
 import { rankReviewOperations } from "./review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "./review-idempotency-engine.mjs";
 import {
+  applyApprovalExpiryPolicy,
   assessReviewApprovalRequirement,
   approveReviewJob,
   createApprovalRequest
@@ -50,6 +51,15 @@ export async function processReviewQueue(rootDir, config, options = {}) {
     recentModes: [],
     lastDecisionAt: null
   });
+  const approvalExpiry = await applyApprovalExpiryPolicy(
+    rootDir,
+    queue,
+    historyPath,
+    config.reviewExecution?.approval ?? {}
+  );
+  if (approvalExpiry.changed) {
+    await writeJson(queuePath, queue);
+  }
   const maxJobs = Number(options.maxJobs) || config.reviewExecution?.maxJobsPerRun || 3;
   const runOnlyJobId = options.jobId ?? null;
   const jobs = queue.filter((job) => job.status === "queued" && (!runOnlyJobId || job.id === runOnlyJobId)).slice(0, maxJobs);
@@ -149,7 +159,8 @@ export async function processReviewQueue(rootDir, config, options = {}) {
             ...notePlan,
             approval: {
               status: "pending",
-              reasons: approvalDecision.reasons
+              reasons: approvalDecision.reasons,
+              pendingAt: finishedAt
             },
             applied: [],
             skipped: notePlan.skipped ?? [],
@@ -172,6 +183,7 @@ export async function processReviewQueue(rootDir, config, options = {}) {
           approval: {
             status: "pending",
             reasons: approvalDecision.reasons,
+            pendingAt: finishedAt,
             approvalPath: approvalRequest.approvalPath
           },
           applied: [],
@@ -277,6 +289,7 @@ export async function processReviewQueue(rootDir, config, options = {}) {
 
   return {
     recovery,
+    approvalExpiry,
     processedCount: processed.length,
     processed,
     retention
