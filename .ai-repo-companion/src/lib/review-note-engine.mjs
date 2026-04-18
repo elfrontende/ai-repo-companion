@@ -36,6 +36,28 @@ export async function applyReviewOperations(rootDir, operations, options = {}) {
       continue;
     }
 
+    if (operation.type === "merge_note_into_existing") {
+      const source = noteById.get(operation.sourceNoteId);
+      const target = noteById.get(operation.targetNoteId);
+      if (!source || !target) {
+        skipped.push({
+          type: operation.type,
+          sourceNoteId: operation.sourceNoteId,
+          targetNoteId: operation.targetNoteId,
+          reason: "Source or target note does not exist."
+        });
+        continue;
+      }
+
+      await mergeNoteIntoExisting(source, target, operation, options.timestamp);
+      applied.push({
+        type: operation.type,
+        sourceNoteId: operation.sourceNoteId,
+        targetNoteId: operation.targetNoteId
+      });
+      continue;
+    }
+
     if (operation.type === "create_note") {
       createdCount += 1;
       const created = await createReviewNote(rootDir, operation, options.timestamp, createdCount);
@@ -82,6 +104,62 @@ async function appendNoteUpdate(filePath, operation, timestamp = new Date().toIS
     tags,
     links
   }, updateLines.join("\n")), "utf8");
+}
+
+async function mergeNoteIntoExisting(sourceNote, targetNote, operation, timestamp = new Date().toISOString()) {
+  // Merge is deliberately non-destructive.
+  // We enrich the target note and mark the source note as deprecated
+  // instead of deleting it. That keeps the knowledge trail auditable.
+  const sourceMarkdown = await fs.readFile(sourceNote.filePath, "utf8");
+  const targetMarkdown = await fs.readFile(targetNote.filePath, "utf8");
+  const { meta: sourceMeta, body: sourceBody } = parseFrontmatter(sourceMarkdown);
+  const { meta: targetMeta, body: targetBody } = parseFrontmatter(targetMarkdown);
+
+  const mergedTargetBody = [
+    targetBody.trim(),
+    "",
+    "## Review Merge",
+    `- ${timestamp}: ${operation.summary.trim()}`,
+    `- merged note: ${sourceNote.id}`,
+    ...(operation.signals ?? []).map((signal) => `- signal: ${signal}`)
+  ].join("\n");
+
+  await fs.writeFile(targetNote.filePath, formatFrontmatter({
+    ...targetMeta,
+    tags: uniqueList([
+      ...normalizeArray(targetMeta.tags),
+      ...normalizeArray(sourceMeta.tags),
+      ...(operation.tagsToAdd ?? [])
+    ]),
+    links: uniqueList([
+      ...normalizeArray(targetMeta.links),
+      ...normalizeArray(sourceMeta.links),
+      sourceNote.id,
+      ...(operation.linksToAdd ?? [])
+    ])
+  }, mergedTargetBody), "utf8");
+
+  const deprecatedBody = [
+    sourceBody.trim(),
+    "",
+    "## Deprecated",
+    `- ${timestamp}: merged into ${targetNote.id}`,
+    `- merge summary: ${operation.summary.trim()}`
+  ].join("\n");
+
+  await fs.writeFile(sourceNote.filePath, formatFrontmatter({
+    ...sourceMeta,
+    kind: "deprecated",
+    tags: uniqueList([
+      ...normalizeArray(sourceMeta.tags),
+      "deprecated",
+      "merged"
+    ]),
+    links: uniqueList([
+      ...normalizeArray(sourceMeta.links),
+      targetNote.id
+    ])
+  }, deprecatedBody), "utf8");
 }
 
 async function createReviewNote(rootDir, operation, timestamp = new Date().toISOString(), ordinal = 1) {
