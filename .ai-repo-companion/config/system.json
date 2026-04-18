@@ -121,6 +121,11 @@
         "codexReasoningEffort": "high"
       }
     },
+    "valueGate": {
+      "enabled": true,
+      "applyToModes": ["balanced"],
+      "minScore": 40
+    },
     "nativeCursor": {
       "enabled": false,
       "binary": "cursor",

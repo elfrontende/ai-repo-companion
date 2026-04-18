@@ -58,6 +58,7 @@ npm test
 - memory policy engine with `cheap`, `balanced`, and `expensive` review modes
 - queued review jobs for future LLM-backed memory cleanup instead of hidden always-on background costs
 - queue compaction so closely related review jobs can merge before they spend another live model run
+- a local value gate that can skip weak `balanced` review jobs before any live model call is made
 - review worker that consumes queued jobs and stores execution reports
 - background review runner with `once` and `loop` modes
 - pluggable provider adapter layer with `dry-run` and `command` execution modes
@@ -183,6 +184,14 @@ Balanced live reviews are now intentionally cheaper than expensive ones:
 - `expensive` keeps the stricter prompt and `high` reasoning effort
 
 This separates routine memory cleanup from high-risk architectural review, which is important for real live-token savings.
+
+Balanced live reviews now also pass through a local value gate:
+
+- the worker scores cheap local signals before it calls a live model
+- weak `balanced` jobs are skipped locally with adapter `value-policy`
+- this avoids paying live tokens for queue entries that only have shallow support
+
+This is the first layer that saves real live cost by reducing the number of model runs, not just shrinking prompt size.
 
 Daily ergonomics are better now too:
 

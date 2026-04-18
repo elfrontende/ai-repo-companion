@@ -8,6 +8,7 @@ import { evaluateReviewOperations } from "./review-quality-engine.mjs";
 import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
 import { rankReviewOperations } from "./review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "./review-idempotency-engine.mjs";
+import { assessReviewValueGate } from "./review-value-gate-engine.mjs";
 import {
   applyApprovalExpiryPolicy,
   assessReviewApprovalRequirement,
@@ -179,8 +180,97 @@ export async function processReviewQueue(rootDir, config, options = {}) {
     await writeJson(queuePath, queue);
 
     try {
-      const payload = await buildReviewPayload(rootDir, job, staleness);
       const effectiveConfig = options.reviewConfig ?? config;
+      const payload = await buildReviewPayload(rootDir, job, staleness);
+      const valueGate = assessReviewValueGate(
+        job,
+        payload,
+        effectiveConfig.reviewExecution?.valueGate ?? {}
+      );
+
+      if (valueGate.shouldSkip) {
+        const finishedAt = new Date().toISOString();
+        const report = {
+          job,
+          payload,
+          execution: {
+            provider: "local",
+            adapter: "value-policy",
+            status: "skipped",
+            output: {
+              reason: "Review job was skipped before any live model call because it did not clear the local value gate.",
+              usage: {
+                totalTokens: 0,
+                durationMs: 0
+              }
+            }
+          },
+          noteChanges: {
+            selectedOperations: [],
+            deferredOperations: [],
+            applied: [],
+            skipped: [],
+            reason: valueGate.reason
+          },
+          valueGate,
+          staleness,
+          recovery: {
+            completed: false,
+            reason: "No local note apply was needed because the value gate skipped the review run."
+          },
+          finishedAt
+        };
+        const reportPath = await persistReviewReport(rootDir, job.id, report);
+
+        job.status = "completed";
+        job.finishedAt = finishedAt;
+        job.reportPath = reportPath;
+        job.execution = {
+          provider: "local",
+          adapter: "value-policy",
+          status: "skipped"
+        };
+        job.valueGate = valueGate;
+
+        releaseQueuedSlots(policyState, job.domains);
+
+        await appendLine(historyPath, JSON.stringify({
+          id: job.id,
+          at: finishedAt,
+          status: job.status,
+          provider: "local",
+          adapter: "value-policy",
+          reportPath
+        }));
+
+        processed.push({
+          id: job.id,
+          status: job.status,
+          reportPath,
+          provider: "local",
+          adapter: "value-policy",
+          noteChanges: report.noteChanges
+        });
+        await recordReviewMetricsEvent(rootDir, {
+          type: "review-processed",
+          at: finishedAt,
+          jobId: job.id,
+          mode: job.mode,
+          domains: job.domains,
+          createdAt: job.createdAt,
+          finishedAt,
+          status: "skipped",
+          adapter: "value-policy",
+          payload,
+          execution: report.execution,
+          noteChanges: report.noteChanges
+        });
+
+        await writeJson(queuePath, queue);
+        await writeJson(policyStatePath, policyState);
+        continue;
+      }
+
       const execution = await executeReviewPayload(rootDir, payload, effectiveConfig);
       const finishedAt = new Date().toISOString();
       const notePlan = await planReviewNoteChanges(rootDir, execution, effectiveConfig, job);
@@ -273,6 +363,7 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         payload,
         execution,
         noteChanges,
+        valueGate,
         staleness,
         recovery: recoveryCompletion,
         finishedAt
