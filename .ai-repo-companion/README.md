@@ -35,6 +35,8 @@ npm run sync -- --task "design a migration-safe auth refactor" --summary "Split 
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow --live
 npm run queue
+npm run status
+npm run doctor
 npm run metrics
 npm run tune
 npm run tune -- --apply
@@ -168,6 +170,13 @@ Local review observability is enabled by default:
 - `node src/cli.mjs metrics` prints a compact local summary for policy tuning
 
 This gives the pipeline enough signal for later tuning without adding any external telemetry dependency.
+
+Daily ergonomics are better now too:
+
+- `node src/cli.mjs status` gives one compact snapshot of queue, worker, metrics, and recovery state
+- `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
+
+This is the operator-facing layer: fewer manual file inspections, more direct answers about whether the runtime looks healthy.
 
 Policy tuning is now metrics-aware:
 
