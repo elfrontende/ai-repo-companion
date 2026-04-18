@@ -132,6 +132,11 @@
       "maxReportFiles": 25,
       "maxHistoryEntries": 200
     },
+    "recovery": {
+      "enabled": true,
+      "strategy": "rollback-and-requeue",
+      "keepBackups": false
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ensureWorkspace } from "../src/lib/bootstrap.mjs";
-import { readJson } from "../src/lib/store.mjs";
+import { readJson, writeJson } from "../src/lib/store.mjs";
 import { classifyTask } from "../src/lib/task-engine.mjs";
 import { planAgents } from "../src/lib/agent-engine.mjs";
 import { assembleContext, loadNotes } from "../src/lib/context-engine.mjs";
@@ -17,6 +17,10 @@ import { evaluateReviewOperations } from "../src/lib/review-quality-engine.mjs";
 import { normalizeReviewOperations } from "../src/lib/review-normalization-engine.mjs";
 import { rankReviewOperations } from "../src/lib/review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "../src/lib/review-idempotency-engine.mjs";
+import {
+  beginReviewApplyRecovery,
+  recoverInterruptedReviewRun
+} from "../src/lib/review-recovery-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -142,6 +146,72 @@ const retainedHistory = (await fs.readFile(path.join(retentionRoot, "state/revie
   .trim()
   .split("\n");
 assert.deepEqual(retainedHistory, ["two", "three", "four"]);
+
+const recoveryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-recovery-"));
+await fs.cp(path.resolve("config"), path.join(recoveryRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(recoveryRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(recoveryRoot, "state"), { recursive: true });
+await ensureWorkspace(recoveryRoot);
+
+const recoveryConfig = await readJson(path.join(recoveryRoot, "config/system.json"), {});
+const recoveryQueuePath = path.join(recoveryRoot, "state/memory/review-queue.json");
+const recoveryHistoryPath = path.join(recoveryRoot, "state/reviews/history.jsonl");
+const recoveryReportPath = path.join(recoveryRoot, "state/reviews/reports/memjob-recovery-1.json");
+const recoveryNotePath = path.join(recoveryRoot, "notes/100-context-minimization.md");
+const originalRecoveryNote = await fs.readFile(recoveryNotePath, "utf8");
+
+const recoveryJob = {
+  id: "memjob-recovery-1",
+  createdAt: "2026-04-18T02:00:00.000Z",
+  startedAt: "2026-04-18T02:01:00.000Z",
+  mode: "balanced",
+  budget: 400,
+  task: "recover an interrupted review apply",
+  domains: ["memory", "notes"],
+  reasons: ["Synthetic recovery test."],
+  status: "running"
+};
+
+await writeJson(recoveryQueuePath, [recoveryJob]);
+await writeJson(recoveryReportPath, {
+  job: recoveryJob,
+  noteChanges: {
+    applied: [],
+    skipped: [],
+    reason: "Synthetic pending apply report."
+  }
+});
+
+const recoverySession = await beginReviewApplyRecovery(
+  recoveryRoot,
+  recoveryJob,
+  recoveryReportPath,
+  recoveryConfig.reviewExecution?.recovery ?? {}
+);
+assert.ok(recoverySession?.sessionId);
+
+await fs.appendFile(recoveryNotePath, "\nINTERRUPTED APPLY MARKER\n", "utf8");
+
+const recoveryResult = await recoverInterruptedReviewRun(
+  recoveryRoot,
+  recoveryConfig.reviewExecution?.recovery ?? {}
+);
+
+assert.equal(recoveryResult.recovered, true);
+const restoredRecoveryNote = await fs.readFile(recoveryNotePath, "utf8");
+assert.equal(restoredRecoveryNote, originalRecoveryNote);
+
+const recoveryQueue = await readJson(recoveryQueuePath, []);
+assert.equal(recoveryQueue[0].status, "queued");
+assert.equal(recoveryQueue[0].recoveryCount, 1);
+assert.equal(recoveryQueue[0].recovery.action, "rolled-back-and-requeued");
+
+const recoveredReport = await readJson(recoveryReportPath, null);
+assert.equal(recoveredReport.recovery.action, "rolled-back-and-requeued");
+assert.match(recoveredReport.noteChanges.reason, /interrupted/i);
+
+const recoveryHistoryRaw = await fs.readFile(recoveryHistoryPath, "utf8");
+assert.match(recoveryHistoryRaw, /"adapter":"recovery-policy"/);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

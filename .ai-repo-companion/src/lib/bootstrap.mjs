@@ -10,6 +10,7 @@ const seedFiles = [
   "state/memory/policy-state.json",
   "state/memory/review-queue.json",
   "state/reviews/history.jsonl",
+  "state/reviews/recovery-state.json",
   "state/reviews/worker-state.json",
   "notes/000-index.md",
   "notes/100-context-minimization.md",
@@ -28,6 +29,7 @@ export async function ensureWorkspace(rootDir) {
     "state/agents",
     "state/memory",
     "state/reviews",
+    "state/reviews/recovery",
     "state/reviews/reports",
     "src",
     "tests"
