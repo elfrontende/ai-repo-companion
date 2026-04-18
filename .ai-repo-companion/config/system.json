@@ -298,6 +298,8 @@
     "benchmarkFreshnessMinutes": 1440,
     "autoTuneFreshnessMinutes": 720,
     "historyRetentionEntries": 100,
+    "benchmarkHistoryRetentionEntries": 50,
+    "benchmarkTrendWindow": 5,
     "autoApplySuggestionIds": [
       "raise-domain-threshold",
       "tighten-ranking-floor",

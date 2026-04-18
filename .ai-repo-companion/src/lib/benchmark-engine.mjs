@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { loadNotes, assembleContext } from "./context-engine.mjs";
 import { classifyTask } from "./task-engine.mjs";
@@ -82,11 +83,16 @@ export async function runSyntheticBenchmark(rootDir, config) {
   };
   const reportPath = path.join(rootDir, "state/benchmarks/last-benchmark.json");
   const historyPath = path.join(rootDir, "state/benchmarks/history.jsonl");
+  const historyRetentionEntries = Number(config.tuning?.benchmarkHistoryRetentionEntries) || 50;
+  const trendWindow = Number(config.tuning?.benchmarkTrendWindow) || 5;
   await writeJson(reportPath, report);
   await appendLine(historyPath, JSON.stringify({
     generatedAt: report.generatedAt,
     aggregate
   }));
+  await trimBenchmarkHistory(historyPath, historyRetentionEntries);
+  report.trend = await buildBenchmarkTrend(historyPath, trendWindow);
+  await writeJson(reportPath, report);
 
   return {
     reportPath,
@@ -226,6 +232,28 @@ function aggregateBenchmarkResults(taskResults) {
   };
 }
 
+async function buildBenchmarkTrend(historyPath, trendWindow) {
+  const entries = await readHistoryEntries(historyPath);
+  const recent = entries.slice(-trendWindow);
+  const latest = recent.at(-1) ?? null;
+  const previous = recent.at(-2) ?? null;
+  const cheapestVariantStreak = countCheapestVariantStreak(recent);
+
+  return {
+    historyEntries: entries.length,
+    trendWindow,
+    recentRuns: recent.map((entry) => ({
+      generatedAt: entry.generatedAt,
+      cheapestVariant: entry.aggregate?.cheapestVariant ?? null,
+      reductionPercent: entry.aggregate?.reductionPercent ?? null
+    })),
+    cheapestVariantStreak,
+    latestCheapestVariant: latest?.aggregate?.cheapestVariant ?? null,
+    deltaByVariant: buildVariantDelta(previous?.aggregate?.byVariant, latest?.aggregate?.byVariant),
+    recommendation: buildTrendRecommendation(cheapestVariantStreak, latest?.aggregate?.cheapestVariant ?? null)
+  };
+}
+
 function resolveBenchmarkReviewProfile(mode, executionConfig = {}) {
   const profiles = executionConfig.reviewProfiles ?? {};
   return mode === "expensive"
@@ -251,4 +279,86 @@ function estimateLiveReviewTokens(contextTokens, reviewProfile, mode) {
   const modeOverhead = mode === "expensive" ? 180 : 60;
   const operationOverhead = Math.max(1, Number(reviewProfile.maxOperations) || 1) * 80;
   return contextTokens + promptOverhead + reasoningOverhead + modeOverhead + operationOverhead;
+}
+
+async function trimBenchmarkHistory(historyPath, maxEntries) {
+  if (!Number.isFinite(maxEntries) || maxEntries <= 0) {
+    return;
+  }
+  const lines = await readTextLines(historyPath);
+  const retained = lines.slice(-maxEntries);
+  const payload = retained.length > 0 ? `${retained.join("\n")}\n` : "";
+  await fs.writeFile(historyPath, payload, "utf8");
+}
+
+async function readHistoryEntries(historyPath) {
+  const lines = await readTextLines(historyPath);
+  return lines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+async function readTextLines(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function countCheapestVariantStreak(entries) {
+  const latestVariant = entries.at(-1)?.aggregate?.cheapestVariant ?? null;
+  if (!latestVariant) {
+    return {
+      variant: null,
+      count: 0
+    };
+  }
+  let count = 0;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index]?.aggregate?.cheapestVariant !== latestVariant) {
+      break;
+    }
+    count += 1;
+  }
+  return {
+    variant: latestVariant,
+    count
+  };
+}
+
+function buildVariantDelta(previousByVariant = {}, latestByVariant = {}) {
+  const keys = new Set([
+    ...Object.keys(previousByVariant ?? {}),
+    ...Object.keys(latestByVariant ?? {})
+  ]);
+  return Object.fromEntries(
+    [...keys].map((key) => [
+      key,
+      {
+        totalTokensDelta: Number(latestByVariant?.[key]?.totalTokens ?? 0) - Number(previousByVariant?.[key]?.totalTokens ?? 0),
+        reductionPercentDelta: Number(latestByVariant?.[key]?.reductionPercent ?? 0) - Number(previousByVariant?.[key]?.reductionPercent ?? 0)
+      }
+    ])
+  );
+}
+
+function buildTrendRecommendation(streak, latestVariant) {
+  if (streak.variant === "saver" && streak.count >= 3) {
+    return "Saver has been the cheapest variant for multiple benchmark runs. Prefer it as the default balanced lane until live metrics disagree.";
+  }
+  if (latestVariant === "balanced") {
+    return "Balanced is currently the cheapest benchmark variant, so the default lane already matches the synthetic trend.";
+  }
+  return "Collect more benchmark history before changing the default cost lane purely from synthetic runs.";
 }
