@@ -6,6 +6,7 @@ import { applyReviewOperations } from "./review-note-engine.mjs";
 import { evaluateReviewOperations } from "./review-quality-engine.mjs";
 import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
 import { rankReviewOperations } from "./review-ranking-engine.mjs";
+import { applyIdempotencyGuard } from "./review-idempotency-engine.mjs";
 
 // The review worker consumes queued memory jobs.
 // It is intentionally separate from the main sync path so background review
@@ -163,15 +164,32 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
     };
   }
 
-  const ranking = await rankReviewOperations(
+  const idempotency = await applyIdempotencyGuard(
     rootDir,
     qualityGate.accepted,
+    config.reviewExecution?.idempotency ?? {}
+  );
+  if (!idempotency.passed) {
+    return {
+      normalization: normalized,
+      qualityGate,
+      idempotency,
+      applied: [],
+      skipped: idempotency.rejected,
+      reason: idempotency.reason
+    };
+  }
+
+  const ranking = await rankReviewOperations(
+    rootDir,
+    idempotency.accepted,
     config.reviewExecution?.operationRanking ?? {}
   );
   if (!ranking.passed) {
     return {
       normalization: normalized,
       qualityGate,
+      idempotency,
       ranking,
       applied: [],
       skipped: ranking.deferred,
@@ -183,6 +201,7 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
   return {
     normalization: normalized,
     qualityGate,
+    idempotency,
     ranking,
     ...appliedResult
   };

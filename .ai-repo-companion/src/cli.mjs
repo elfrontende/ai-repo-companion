@@ -305,6 +305,9 @@ function describeRuntimeReviewConfig(config) {
     operationRanking: {
       maxAppliedOperations: config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2,
       minScore: config.reviewExecution?.operationRanking?.minScore ?? 35
+    },
+    idempotency: {
+      minSimilarityScore: config.reviewExecution?.idempotency?.minSimilarityScore ?? 7
     }
   };
 }
