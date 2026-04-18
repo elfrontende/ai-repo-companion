@@ -9,14 +9,18 @@ import { readJson } from "./store.mjs";
 // They intentionally summarize local runtime state instead of exposing raw
 // internals that a repo owner would have to mentally reconstruct.
 
-export async function getRuntimeStatus(rootDir) {
+export async function getRuntimeStatus(rootDir, config = {}) {
   const queue = await inspectReviewQueue(rootDir);
   const metrics = await summarizeReviewMetrics(rootDir);
+  const benchmarkSummary = await readBenchmarkSummary(rootDir, config);
+  const tuningSummary = await readTuningSummary(rootDir, config);
   return {
     queue,
     worker: await getWorkerState(rootDir),
     metrics,
     costSummary: buildCostSummary(queue, metrics),
+    benchmarkSummary,
+    tuningSummary,
     recovery: await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null)
   };
 }
@@ -26,6 +30,8 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
   const worker = await getWorkerState(rootDir);
   const recovery = await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null);
   const lock = await readJson(path.join(rootDir, "state/reviews/worker-lock.json"), null);
+  const benchmarkSummary = await readBenchmarkSummary(rootDir, config);
+  const tuningSummary = await readTuningSummary(rootDir, config);
   const findings = [];
 
   if (worker.status === "running" && queue.running === 0) {
@@ -79,10 +85,43 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     }
   }
 
+  if (!benchmarkSummary.loaded) {
+    findings.push({
+      severity: "info",
+      code: "benchmark-missing",
+      message: "No synthetic benchmark report exists yet. Run `benchmark` before trusting cost recommendations."
+    });
+  } else if (benchmarkSummary.isStale) {
+    findings.push({
+      severity: "warning",
+      code: "benchmark-stale",
+      message: "The last synthetic benchmark is stale. Refresh it before changing runtime cost defaults."
+    });
+  }
+
+  if (benchmarkSummary.cheapestVariant === "saver"
+    && (config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium") !== "low") {
+    findings.push({
+      severity: "info",
+      code: "balanced-lane-heavier-than-benchmark",
+      message: "Synthetic benchmark says saver is cheaper, but balanced reasoning effort is still above the lean lane. Run `tune --auto` or lower the balanced profile manually."
+    });
+  }
+
+  if (benchmarkSummary.cheapestVariant === "saver" && tuningSummary.loaded && tuningSummary.isStale) {
+    findings.push({
+      severity: "info",
+      code: "auto-tune-stale",
+      message: "Synthetic benchmark favors the saver lane, but the last auto-tune is stale. Consider running `tune --auto` again."
+    });
+  }
+
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     queue,
     worker,
+    benchmarkSummary,
+    tuningSummary,
     recovery,
     lock: lock ?? {},
     findings
@@ -123,6 +162,46 @@ function buildCostSummary(queue, metrics) {
       expensiveQueued
     })
   };
+}
+
+async function readBenchmarkSummary(rootDir, config = {}) {
+  const benchmark = await readJson(path.join(rootDir, "state/benchmarks/last-benchmark.json"), null);
+  const generatedAt = benchmark?.generatedAt ?? null;
+  const freshnessMinutes = config.tuning?.benchmarkFreshnessMinutes ?? 1440;
+  const ageMinutes = ageInMinutes(generatedAt);
+  return {
+    loaded: Boolean(benchmark?.aggregate),
+    generatedAt,
+    ageMinutes,
+    isStale: ageMinutes > freshnessMinutes,
+    cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
+    balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
+    saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null
+  };
+}
+
+async function readTuningSummary(rootDir, config = {}) {
+  const tuning = await readJson(path.join(rootDir, "state/tuning/last-tuning.json"), null);
+  const generatedAt = tuning?.generatedAt ?? null;
+  const freshnessMinutes = config.tuning?.autoTuneFreshnessMinutes ?? 720;
+  const ageMinutes = ageInMinutes(generatedAt);
+  return {
+    loaded: Boolean(tuning?.generatedAt),
+    generatedAt,
+    ageMinutes,
+    isStale: ageMinutes > freshnessMinutes,
+    mode: tuning?.mode ?? null,
+    appliedCount: Array.isArray(tuning?.applied) ? tuning.applied.length : 0,
+    blockedCount: Array.isArray(tuning?.blocked) ? tuning.blocked.length : 0
+  };
+}
+
+function ageInMinutes(timestamp) {
+  const ts = Date.parse(timestamp ?? "");
+  if (!Number.isFinite(ts)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, Math.floor((Date.now() - ts) / 60000));
 }
 
 function buildCostRecommendation(summary) {

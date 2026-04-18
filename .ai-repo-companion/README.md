@@ -200,6 +200,8 @@ Daily ergonomics are better now too:
 
 - `node src/cli.mjs status` gives one compact snapshot of queue, worker, metrics, and recovery state
 - `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
+- `status` now also surfaces the latest benchmark summary and last auto-tune snapshot
+- `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `--costMode saver|balanced|strict` lets one live run be cheaper or stricter without editing `system.json`
 - `--reviewProfile light|auto|heavy` lets one live run force a lighter or heavier review profile
 

@@ -295,6 +295,8 @@
   "tuning": {
     "autoApplyEnabled": true,
     "cooldownMinutes": 720,
+    "benchmarkFreshnessMinutes": 1440,
+    "autoTuneFreshnessMinutes": 720,
     "historyRetentionEntries": 100,
     "autoApplySuggestionIds": [
       "raise-domain-threshold",

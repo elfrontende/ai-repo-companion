@@ -165,7 +165,7 @@ async function runStatus() {
   return {
     rootDir,
     mode: "status",
-    status: await getRuntimeStatus(rootDir)
+    status: await getRuntimeStatus(rootDir, systemConfig)
   };
 }
 
