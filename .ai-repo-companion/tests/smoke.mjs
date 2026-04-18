@@ -1013,6 +1013,10 @@ await writeJson(path.join(statusRoot, "state/reviews/metrics.json"), {
   },
   byAdapter: { "dry-run": 2 },
   byMode: { balanced: 2 },
+  tokensByDomain: {
+    docs: 12000,
+    deploy: 4000
+  },
   recentEvents: []
 });
 await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
@@ -1020,6 +1024,36 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
   aggregate: {
     taskCount: 5,
     cheapestVariant: "saver",
+    byDomain: {
+      docs: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 49.5 },
+          balanced: { reductionPercent: 41.2 }
+        }
+      },
+      deploy: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 46.1 },
+          balanced: { reductionPercent: 41.8 }
+        }
+      },
+      ui: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 38.4 },
+          balanced: { reductionPercent: 40.2 }
+        }
+      },
+      testing: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 44.1 },
+          balanced: { reductionPercent: 40.7 }
+        }
+      }
+    },
     byVariant: {
       saver: {
         totalTokens: 4200,
@@ -1053,6 +1087,9 @@ assert.equal(runtimeStatus.metrics.cost.liveTokensUsed, 0);
 assert.equal(runtimeStatus.costSummary.queuePressure.balancedQueued, 1);
 assert.equal(runtimeStatus.benchmarkSummary.loaded, true);
 assert.equal(runtimeStatus.benchmarkSummary.cheapestVariant, "saver");
+assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].domain, "docs");
+assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].shouldTightenValueGate, true);
+assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].liveTokensUsed, 12000);
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
@@ -1061,6 +1098,7 @@ const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
 assert.equal(runtimeDoctor.ok, true);
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "balanced-lane-heavier-than-benchmark"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "auto-tune-stale"));
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate-drift-docs"));
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
