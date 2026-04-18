@@ -8,15 +8,20 @@ import { readJson, writeJson } from "./store.mjs";
 
 export async function analyzePolicyTuning(rootDir) {
   const configPath = path.join(rootDir, "config/system.json");
+  const benchmarkPath = path.join(rootDir, "state/benchmarks/last-benchmark.json");
   const config = await readJson(configPath, {});
   const metrics = await getReviewMetrics(rootDir);
-  const suggestions = buildPolicySuggestions(config, metrics);
+  const benchmark = await readJson(benchmarkPath, null);
+  const suggestions = buildPolicySuggestions(config, metrics, benchmark);
 
   return {
     configPath,
+    benchmarkPath,
     metrics,
+    benchmark,
     suggestions,
     summary: {
+      benchmarkLoaded: Boolean(benchmark?.aggregate),
       suggestionCount: suggestions.length,
       applyableCount: suggestions.filter((item) => item.canApply).length
     }
@@ -51,7 +56,7 @@ export async function applyPolicyTuning(rootDir) {
   };
 }
 
-function buildPolicySuggestions(config, metrics) {
+function buildPolicySuggestions(config, metrics, benchmark) {
   const suggestions = [];
   const counters = metrics.counters ?? {};
   const queueLatencyAvg = averageLatency(metrics.latencies?.queueMinutes);
@@ -124,6 +129,35 @@ function buildPolicySuggestions(config, metrics) {
     path: ["reviewExecution", "valueGate", "minScore"],
     currentValue: config.reviewExecution?.valueGate?.minScore ?? 60,
     proposedValue: Math.max(30, (config.reviewExecution?.valueGate?.minScore ?? 60) - 5)
+  });
+
+  // Runtime metrics tell us whether the current policy wastes live calls.
+  // Benchmark variants tell us whether the cheaper review lane consistently
+  // wins on the same synthetic workload. We use both signals so the tuner
+  // does not overreact to one noisy day of real runs.
+  const balancedVariant = benchmark?.aggregate?.byVariant?.balanced;
+  const saverVariant = benchmark?.aggregate?.byVariant?.saver;
+
+  maybePushSuggestion(suggestions, {
+    id: "benchmark-lower-balanced-effort",
+    condition: benchmark?.aggregate?.cheapestVariant === "saver"
+      && Number(saverVariant?.totalTokens) > 0
+      && Number(balancedVariant?.totalTokens) > Number(saverVariant?.totalTokens) * 1.08,
+    reason: "Synthetic benchmark says the saver profile is clearly cheaper than balanced, so the default balanced Codex reasoning effort can be lowered.",
+    path: ["reviewExecution", "reviewProfiles", "balanced", "codexReasoningEffort"],
+    currentValue: config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium",
+    proposedValue: "low"
+  });
+
+  maybePushSuggestion(suggestions, {
+    id: "benchmark-lean-balanced-operations",
+    condition: benchmark?.aggregate?.cheapestVariant === "saver"
+      && Number(saverVariant?.totalTokens) > 0
+      && Number(balancedVariant?.totalTokens) > Number(saverVariant?.totalTokens) * 1.12,
+    reason: "Synthetic benchmark shows balanced is still materially heavier than saver, so its operation budget should shrink toward the cheaper lane.",
+    path: ["reviewExecution", "reviewProfiles", "balanced", "maxOperations"],
+    currentValue: config.reviewExecution?.reviewProfiles?.balanced?.maxOperations ?? 2,
+    proposedValue: 1
   });
 
   return suggestions;
