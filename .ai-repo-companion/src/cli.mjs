@@ -11,6 +11,7 @@ import { approvePendingReview, inspectReviewQueue, processReviewQueue } from "./
 import { getWorkerState, runReviewWorker } from "./lib/review-runner.mjs";
 import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
+import { analyzePolicyTuning, applyPolicyTuning } from "./lib/policy-tuning-engine.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +59,9 @@ switch (command) {
     break;
   case "metrics":
     output(await runMetrics());
+    break;
+  case "tune":
+    output(await runTune(args));
     break;
   case "review":
     output(await runReview(args));
@@ -150,6 +154,16 @@ async function runMetrics() {
     rootDir,
     mode: "metrics",
     metrics: await summarizeReviewMetrics(rootDir)
+  };
+}
+
+async function runTune(args) {
+  return {
+    rootDir,
+    mode: "tune",
+    tuning: args.apply
+      ? await applyPolicyTuning(rootDir)
+      : await analyzePolicyTuning(rootDir)
   };
 }
 
@@ -285,6 +299,8 @@ function helpText() {
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
       "node src/cli.mjs queue",
       "node src/cli.mjs metrics",
+      "node src/cli.mjs tune",
+      "node src/cli.mjs tune --apply",
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",
       "node src/cli.mjs review --jobId memjob-123 --live --model gpt-5.4",
