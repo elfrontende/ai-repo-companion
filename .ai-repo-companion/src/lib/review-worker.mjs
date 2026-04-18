@@ -3,6 +3,7 @@ import { appendLine, readJson, writeJson } from "./store.mjs";
 import { assembleContext, loadNotes } from "./context-engine.mjs";
 import { executeReviewPayload, persistReviewReport } from "./provider-engine.mjs";
 import { applyReviewOperations } from "./review-note-engine.mjs";
+import { evaluateReviewOperations } from "./review-quality-engine.mjs";
 
 // The review worker consumes queued memory jobs.
 // It is intentionally separate from the main sync path so background review
@@ -136,11 +137,31 @@ async function maybeApplyReviewOperations(rootDir, execution, timestamp) {
   const operations = execution.output?.parsed?.operations;
   if (!Array.isArray(operations) || operations.length === 0) {
     return {
+      qualityGate: {
+        passed: false,
+        accepted: [],
+        rejected: [],
+        reason: "Execution produced no structured note operations."
+      },
       applied: [],
       skipped: [],
       reason: "Execution produced no structured note operations."
     };
   }
 
-  return applyReviewOperations(rootDir, operations, { timestamp });
+  const qualityGate = await evaluateReviewOperations(rootDir, operations);
+  if (!qualityGate.passed) {
+    return {
+      qualityGate,
+      applied: [],
+      skipped: qualityGate.rejected,
+      reason: qualityGate.reason
+    };
+  }
+
+  const appliedResult = await applyReviewOperations(rootDir, qualityGate.accepted, { timestamp });
+  return {
+    qualityGate,
+    ...appliedResult
+  };
 }

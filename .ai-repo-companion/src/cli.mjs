@@ -298,7 +298,9 @@ function describeRuntimeReviewConfig(config) {
     providerByMode: config.reviewExecution?.providerByMode ?? {},
     nativeCodex: {
       enabled: config.reviewExecution?.nativeCodex?.enabled ?? false,
-      model: config.reviewExecution?.nativeCodex?.model ?? ""
+      model: config.reviewExecution?.nativeCodex?.model ?? "",
+      maxAttempts: config.reviewExecution?.nativeCodex?.maxAttempts ?? 1,
+      retryBackoffMs: config.reviewExecution?.nativeCodex?.retryBackoffMs ?? 0
     }
   };
 }
