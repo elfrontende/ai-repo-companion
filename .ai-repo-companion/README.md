@@ -32,6 +32,8 @@ npm run plan -- --task "design a migration-safe auth refactor"
 npm run policy -- --task "design a migration-safe auth refactor"
 npm run context -- --task "design a migration-safe auth refactor" --budget 900
 npm run sync -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions"
+npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow
+npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow --live
 npm run queue
 npm run review -- --maxJobs 1
 npm run worker -- --maxJobs 1
@@ -82,6 +84,26 @@ Persistent policy state lives in:
 5. `sync` always performs local memory maintenance.
 6. If policy says `balanced` or `expensive`, `sync` also queues a future review job instead of silently spending extra tokens immediately.
 7. `review` consumes queued jobs through a provider adapter and stores a report.
+
+If you want one command instead of separate `sync` and `review` calls, use:
+
+```bash
+node src/cli.mjs task --task "design a migration-safe auth refactor" \
+  --summary "Split auth boundary, add tests, capture migration assumptions" \
+  --artifacts "auth,tests,docs" \
+  --reviewNow
+```
+
+That command runs:
+
+1. task classification
+2. agent planning
+3. bounded context assembly
+4. local memory sync
+5. queue creation when policy requires it
+6. immediate review processing when `--reviewNow` is present
+
+This is the easiest Codex-first flow to use after finishing a task.
 
 This design keeps hidden token burn under control: the local sync path is always deterministic, while deeper memory reasoning becomes explicit and inspectable.
 

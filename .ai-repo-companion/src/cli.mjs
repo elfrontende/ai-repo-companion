@@ -9,6 +9,7 @@ import { syncMemory } from "./lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "./lib/policy-engine.mjs";
 import { inspectReviewQueue, processReviewQueue } from "./lib/review-worker.mjs";
 import { getWorkerState, runReviewWorker } from "./lib/review-runner.mjs";
+import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +47,10 @@ switch (command) {
   case "sync":
     await requireTask(args);
     output(await runSync(args));
+    break;
+  case "task":
+    await requireTask(args);
+    output(await runTask(args));
     break;
   case "queue":
     output(await runQueue());
@@ -130,6 +135,24 @@ async function runQueue() {
     rootDir,
     mode: "queue",
     queue: await inspectReviewQueue(rootDir)
+  };
+}
+
+async function runTask(args) {
+  const reviewConfig = buildRuntimeReviewConfig(systemConfig, args);
+
+  return {
+    rootDir,
+    mode: "task",
+    flow: await runTaskFlow(rootDir, systemConfig, {
+      task: args.task,
+      summary: args.summary,
+      artifacts: splitCsv(args.artifacts),
+      budget: args.budget,
+      reviewNow: args.reviewNow,
+      reviewConfig
+    }),
+    runtimeReviewConfig: describeRuntimeReviewConfig(reviewConfig)
   };
 }
 
@@ -228,6 +251,8 @@ function helpText() {
       "node src/cli.mjs policy --task \"design a token-efficient memory system\"",
       "node src/cli.mjs context --task \"design a token-efficient memory system\" --budget 900",
       "node src/cli.mjs sync --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\"",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
       "node src/cli.mjs queue",
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",

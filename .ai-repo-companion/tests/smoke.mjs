@@ -12,6 +12,7 @@ import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "../src/lib/polic
 import { inspectReviewQueue, processReviewQueue } from "../src/lib/review-worker.mjs";
 import { applyReviewOperations } from "../src/lib/review-note-engine.mjs";
 import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
+import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -198,5 +199,18 @@ const workerState = await getWorkerState(tempRoot);
 assert.equal(workerState.status, "idle");
 assert.equal(workerState.lastRunMode, "once");
 assert.ok(workerState.runs >= 1);
+
+const taskFlowResult = await runTaskFlow(tempRoot, config, {
+  task: "document a medium-risk auth review handoff",
+  summary: "Capture the handoff and immediately process the queued review in one flow.",
+  artifacts: ["task-flow", "review"],
+  reviewNow: true,
+  reviewConfig: config
+});
+
+assert.equal(taskFlowResult.review.status, "processed");
+assert.equal(taskFlowResult.review.result.processedCount, 1);
+assert.equal(taskFlowResult.review.result.processed[0].adapter, "dry-run");
+assert.equal(taskFlowResult.policyOutcome.queuedJob.id, taskFlowResult.review.queuedJobId);
 
 console.log("smoke test passed");
