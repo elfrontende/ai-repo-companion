@@ -132,4 +132,27 @@ const createdReviewNote = notesAfterApply.find((note) => note.title === "Review-
 assert.ok(createdReviewNote);
 assert.equal(createdReviewNote.kind, "principle");
 
+const mergeResult = await applyReviewOperations(tempRoot, [
+  {
+    type: "merge_note_into_existing",
+    sourceNoteId: createdReviewNote.id,
+    targetNoteId: "z-130-background-memory-sync",
+    summary: "The review hygiene guidance belongs inside the background memory sync note.",
+    signals: ["Keep duplicate policy notes merged into the operational memory note."],
+    tagsToAdd: ["note-merge"]
+  }
+], { timestamp: "2026-04-18T01:00:00.000Z" });
+
+assert.equal(mergeResult.applied.length, 1);
+
+const notesAfterMerge = await loadNotes(tempRoot);
+const mergeTarget = notesAfterMerge.find((note) => note.id === "z-130-background-memory-sync");
+assert.ok(mergeTarget.body.includes("Review Merge"));
+assert.ok(mergeTarget.tags.includes("note-merge"));
+
+const deprecatedSource = notesAfterMerge.find((note) => note.id === createdReviewNote.id);
+assert.equal(deprecatedSource.kind, "deprecated");
+assert.ok(deprecatedSource.tags.includes("deprecated"));
+assert.ok(deprecatedSource.links.includes("z-130-background-memory-sync"));
+
 console.log("smoke test passed");

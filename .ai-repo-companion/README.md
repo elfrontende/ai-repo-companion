@@ -122,6 +122,7 @@ When `reviewExecution.nativeCodex.enabled=true`, the worker will:
 Supported structured operations today:
 
 - `append_note_update`
+- `merge_note_into_existing`
 - `create_note`
 
 The model does not edit note files directly. It only proposes structured operations, and local code applies them. This is safer and easier to debug than letting an LLM write free-form Markdown into the note graph.
