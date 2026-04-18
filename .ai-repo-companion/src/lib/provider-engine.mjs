@@ -77,23 +77,71 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
     args.splice(args.length - 1, 0, ...nativeCodex.extraArgs);
   }
 
-  const result = await runCommand("codex", args, prompt, rootDir);
-  if (result.code !== 0) {
+  // Live Codex runs are the most fragile part of the pipeline because they
+  // depend on an external CLI and a strict output contract.
+  // We retry a small number of times so temporary transport or parse issues
+  // do not immediately downgrade the whole review job to failed.
+  const retryConfig = {
+    maxAttempts: Math.max(1, Number(nativeCodex.maxAttempts) || 2),
+    retryBackoffMs: Math.max(0, Number(nativeCodex.retryBackoffMs) || 1500)
+  };
+  const attempts = [];
+  let raw = "";
+  let parsed = null;
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt += 1) {
+    const result = await runCommand("codex", args, prompt, rootDir);
+    lastResult = result;
+    const attemptRecord = {
+      attempt,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      exitCode: result.code
+    };
+
+    if (result.code === 0) {
+      try {
+        raw = await fs.readFile(outputPath, "utf8");
+        parsed = JSON.parse(raw);
+        attempts.push({
+          ...attemptRecord,
+          status: "completed"
+        });
+        break;
+      } catch (error) {
+        attempts.push({
+          ...attemptRecord,
+          status: "failed",
+          parseError: error.message
+        });
+      }
+    } else {
+      attempts.push({
+        ...attemptRecord,
+        status: "failed"
+      });
+    }
+
+    if (attempt < retryConfig.maxAttempts) {
+      await sleep(retryConfig.retryBackoffMs * attempt);
+    }
+  }
+
+  if (!parsed) {
     return {
       provider: "codex",
       adapter: "codex-native",
       status: "failed",
       output: {
         args,
-        stdout: result.stdout.trim(),
-        stderr: result.stderr.trim(),
-        exitCode: result.code
+        attempts,
+        stdout: lastResult?.stdout?.trim?.() ?? "",
+        stderr: lastResult?.stderr?.trim?.() ?? "",
+        exitCode: lastResult?.code ?? 1
       }
     };
   }
-
-  const raw = await fs.readFile(outputPath, "utf8");
-  const parsed = JSON.parse(raw);
 
   return {
     provider: "codex",
@@ -101,6 +149,7 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
     status: "completed",
     output: {
       args,
+      attempts,
       raw,
       parsed
     }
@@ -190,6 +239,10 @@ function runCommand(command, args, stdinBody, cwd) {
     child.stdin.write(stdinBody);
     child.stdin.end();
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildCodexOutputSchema() {

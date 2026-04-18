@@ -13,6 +13,7 @@ import { inspectReviewQueue, processReviewQueue } from "../src/lib/review-worker
 import { applyReviewOperations } from "../src/lib/review-note-engine.mjs";
 import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
 import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
+import { evaluateReviewOperations } from "../src/lib/review-quality-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -167,6 +168,45 @@ const invalidResult = await applyReviewOperations(tempRoot, [
 assert.equal(invalidResult.applied.length, 0);
 assert.equal(invalidResult.skipped.length, 1);
 assert.match(invalidResult.skipped[0].reason, /requires title/);
+
+const gateResult = await evaluateReviewOperations(tempRoot, [
+  {
+    type: "append_note_update",
+    noteId: "z-100-context-minimization",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "",
+    kind: "",
+    summary: "Too short",
+    signals: [],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: [],
+    links: []
+  },
+  {
+    type: "create_note",
+    noteId: "",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "Migration-safe auth review contract",
+    kind: "decision",
+    summary: "Review workers should validate a versioned internal contract so auth migrations do not leak database-shape changes into memory review authorization.",
+    signals: [
+      "Use versioned internal auth contracts for review workers",
+      "Keep worker validation stable across auth migrations"
+    ],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: ["auth", "migration", "review-worker"],
+    links: ["z-000-index"]
+  }
+]);
+
+assert.equal(gateResult.passed, true);
+assert.equal(gateResult.accepted.length, 1);
+assert.equal(gateResult.rejected.length, 1);
+assert.match(gateResult.rejected[0].reason, /too short/i);
 
 const notesAfterMerge = await loadNotes(tempRoot);
 const mergeTarget = notesAfterMerge.find((note) => note.id === "z-130-background-memory-sync");

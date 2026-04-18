@@ -161,6 +161,32 @@ Important Codex detail:
 
 This looks verbose, but it matches the current Codex JSON schema requirements and keeps live runs stable.
 
+Codex live safety now has two extra layers:
+
+- retry/backoff: native Codex review can retry once or more when the CLI fails or the output JSON cannot be parsed
+- quality gate: even valid JSON is filtered before apply, so tiny summaries or low-signal note writes are rejected instead of being saved
+
+These defaults live in `config/system.json`:
+
+```json
+"nativeCodex": {
+  "enabled": false,
+  "model": "",
+  "sandbox": "workspace-write",
+  "maxAttempts": 2,
+  "retryBackoffMs": 1500,
+  "extraArgs": []
+}
+```
+
+Quality gate rules are intentionally simple:
+
+- `create_note` must have a meaningful title, summary, tags, and at least two signals
+- `append_note_update` must target a real note and add some real signal
+- `merge_note_into_existing` must reference real notes and explain the merge
+
+If all operations fail the gate, the review run is still reported, but no note files are modified.
+
 Example config:
 
 ```json

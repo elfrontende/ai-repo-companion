@@ -104,6 +104,8 @@
       "enabled": false,
       "model": "",
       "sandbox": "workspace-write",
+      "maxAttempts": 2,
+      "retryBackoffMs": 1500,
       "extraArgs": []
     },
     "commandAdapters": {
