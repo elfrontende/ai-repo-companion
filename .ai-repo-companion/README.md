@@ -208,10 +208,10 @@ This is the operator-facing layer: fewer manual file inspections, more direct an
 Synthetic validation is built in too:
 
 - `node src/cli.mjs benchmark` runs a small local suite of tasks with mixed difficulty
-- each sample compares `withSystem` against a naive `baseline` that always drags the full note set
+- each sample compares `saver`, `balanced`, and `strict` system variants against a naive `baseline` that always drags the full note set
 - reports are written to `state/benchmarks/last-benchmark.json`
 
-This gives a repeatable local proxy for token savings before you trust the system on real repository work.
+This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 
 Policy tuning is now metrics-aware:
 
