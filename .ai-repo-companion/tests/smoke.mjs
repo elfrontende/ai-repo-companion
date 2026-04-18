@@ -39,6 +39,7 @@ import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-en
 import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
+import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -202,6 +203,33 @@ assert.equal(valueGateMetrics.counters.processedJobs, 1);
 assert.equal(valueGateMetrics.counters.skippedJobs, 1);
 assert.equal(valueGateMetrics.cost.liveTokensUsed, 0);
 assert.ok(valueGateMetrics.topAdapters.some((entry) => entry.key === "value-policy"));
+
+const domainValueGate = assessReviewValueGate(
+  {
+    mode: "balanced",
+    domains: ["docs"],
+    reasons: ["Synthetic domain value-gate test."],
+    sourceEventIds: ["evt-domain-gate-1"],
+    mergedTaskCount: 1
+  },
+  {
+    contextBundle: {
+      selectedNotes: [{ id: "100-context-minimization" }],
+      usedTokens: 180
+    }
+  },
+  {
+    enabled: true,
+    applyToModes: ["balanced"],
+    minScore: 60,
+    minScoreByDomain: {
+      docs: 70
+    }
+  }
+);
+assert.equal(domainValueGate.threshold, 70);
+assert.equal(domainValueGate.thresholdSource, "domain:docs");
+assert.equal(domainValueGate.shouldSkip, true);
 
 const retentionRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-retention-"));
 await fs.mkdir(path.join(retentionRoot, "state/reviews/reports"), { recursive: true });
@@ -610,6 +638,36 @@ await writeJson(path.join(tuningRoot, "state/benchmarks/last-benchmark.json"), {
   aggregate: {
     taskCount: 5,
     cheapestVariant: "saver",
+    byDomain: {
+      docs: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 51.4 },
+          balanced: { reductionPercent: 42.1 }
+        }
+      },
+      deploy: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 48.8 },
+          balanced: { reductionPercent: 40.6 }
+        }
+      },
+      ui: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 46.4 },
+          balanced: { reductionPercent: 39.9 }
+        }
+      },
+      testing: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 44.1 },
+          balanced: { reductionPercent: 37.6 }
+        }
+      }
+    },
     byVariant: {
       saver: {
         totalTokens: 4200,
@@ -637,15 +695,19 @@ assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-ranking
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-value-gate"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "benchmark-lower-balanced-effort"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "benchmark-lean-balanced-operations"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "domain-tighten-value-gate-docs"));
+assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "domain-tighten-value-gate-deploy"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-budget"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
-assert.ok(tuningApply.applied.length >= 6);
+assert.ok(tuningApply.applied.length >= 8);
 const tunedConfig = await readJson(path.join(tuningRoot, "config/system.json"), {});
 assert.equal(tunedConfig.memoryPolicy.sameDomainEventThreshold, 4);
 assert.equal(tunedConfig.reviewExecution.operationRanking.minScore, 40);
 assert.equal(tunedConfig.reviewExecution.valueGate.minScore, 65);
+assert.equal(tunedConfig.reviewExecution.valueGate.minScoreByDomain.docs, 65);
+assert.equal(tunedConfig.reviewExecution.valueGate.minScoreByDomain.deploy, 65);
 assert.equal(tunedConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "low");
 assert.equal(tunedConfig.reviewExecution.reviewProfiles.balanced.maxOperations, 1);
 assert.equal(tunedConfig.reviewExecution.operationRanking.maxAppliedOperations, 3);
@@ -770,11 +832,13 @@ await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"),
 
 const autoTuningFirst = await runAutoPolicyTuning(autoTuneRoot);
 assert.equal(autoTuningFirst.enabled, true);
-assert.ok(autoTuningFirst.applied.length >= 3);
+assert.ok(autoTuningFirst.applied.length >= 5);
 assert.ok(autoTuningFirst.applied.some((item) => item.id === "tighten-value-gate"));
 assert.ok(autoTuningFirst.applied.some((item) => item.id === "benchmark-lower-balanced-effort"));
+assert.ok(autoTuningFirst.applied.some((item) => item.id === "domain-tighten-value-gate-docs"));
 const autoTunedConfig = await readJson(path.join(autoTuneRoot, "config/system.json"), {});
 assert.equal(autoTunedConfig.reviewExecution.valueGate.minScore, 65);
+assert.equal(autoTunedConfig.reviewExecution.valueGate.minScoreByDomain.docs, 65);
 assert.equal(autoTunedConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "low");
 
 const autoTuneState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-tune-state.json"), {});
@@ -854,6 +918,7 @@ assert.ok(reconcileResult.rolledBack.some((item) => item.id === "tighten-value-g
 assert.ok(reconcileResult.reasons.some((reason) => /cheapest variant changed/i.test(reason)));
 const rolledBackConfig = await readJson(path.join(autoTuneRoot, "config/system.json"), {});
 assert.equal(rolledBackConfig.reviewExecution.valueGate.minScore, 60);
+assert.equal(rolledBackConfig.reviewExecution.valueGate.minScoreByDomain.docs, undefined);
 assert.equal(rolledBackConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "medium");
 const rolledBackTuning = await readJson(path.join(autoTuneRoot, "state/tuning/last-tuning.json"), {});
 assert.equal(rolledBackTuning.canary.status, "rolled-back");

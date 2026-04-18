@@ -9,12 +9,13 @@
 // - how much context the bounded retriever found for it
 
 export function assessReviewValueGate(job, payload, config = {}) {
+  const resolvedThreshold = resolveDomainAwareThreshold(job, config);
   const gate = {
     enabled: config.enabled !== false,
     applyToModes: Array.isArray(config.applyToModes) && config.applyToModes.length > 0
       ? config.applyToModes
       : ["balanced"],
-    minScore: Math.max(1, Number(config.minScore) || 40)
+    minScore: resolvedThreshold.value
   };
 
   if (!gate.enabled) {
@@ -76,6 +77,7 @@ export function assessReviewValueGate(job, payload, config = {}) {
     shouldSkip: !passed,
     score,
     threshold: gate.minScore,
+    thresholdSource: resolvedThreshold.source,
     contributions,
     reason: passed
       ? "Review job cleared the local value gate and can use a live model call."
@@ -91,8 +93,33 @@ function buildSkippedAssessment(gate, reason) {
     shouldSkip: false,
     score: null,
     threshold: gate.minScore,
+    thresholdSource: "default",
     contributions: [],
     reason
+  };
+}
+
+function resolveDomainAwareThreshold(job, config) {
+  const defaultThreshold = Math.max(1, Number(config.minScore) || 40);
+  const perDomain = config.minScoreByDomain ?? {};
+  const domains = Array.isArray(job?.domains) ? job.domains : [];
+  let matchedDomain = null;
+  let matchedThreshold = defaultThreshold;
+
+  for (const domain of domains) {
+    const domainThreshold = Number(perDomain?.[domain]);
+    if (!Number.isFinite(domainThreshold)) {
+      continue;
+    }
+    if (domainThreshold > matchedThreshold) {
+      matchedThreshold = Math.max(1, domainThreshold);
+      matchedDomain = domain;
+    }
+  }
+
+  return {
+    value: matchedThreshold,
+    source: matchedDomain ? `domain:${matchedDomain}` : "default"
   };
 }
 
