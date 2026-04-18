@@ -332,6 +332,7 @@ function helpText() {
       "node src/cli.mjs sync --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\"",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
+      "node src/cli.mjs task --task \"capture auth rollout learnings\" --summary \"Collapsed duplicate auth notes\" --artifacts \"notes,worker\" --reviewNow --live --provider cursor",
       "node src/cli.mjs queue",
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
@@ -342,6 +343,7 @@ function helpText() {
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",
       "node src/cli.mjs review --jobId memjob-123 --live --model gpt-5.4",
+      "node src/cli.mjs review --jobId memjob-123 --live --provider cursor",
       "node src/cli.mjs approve --jobId memjob-123",
       "node src/cli.mjs worker --maxJobs 1",
       "node src/cli.mjs worker --loop --intervalSeconds 30 --stopWhenEmpty",
@@ -361,18 +363,34 @@ function buildRuntimeReviewConfig(baseConfig, args) {
     return config;
   }
 
+  const provider = args.provider ?? "codex";
+
   execution.providerByMode = {
     ...(execution.providerByMode ?? {}),
-    balanced: "codex",
-    expensive: "codex"
+    balanced: provider,
+    expensive: provider
   };
   execution.nativeCodex = {
     ...(execution.nativeCodex ?? {}),
-    enabled: true
+    enabled: false
+  };
+  execution.nativeCursor = {
+    ...(execution.nativeCursor ?? {}),
+    enabled: false
   };
 
-  if (args.model) {
-    execution.nativeCodex.model = args.model;
+  if (provider === "codex") {
+    execution.nativeCodex.enabled = true;
+    if (args.model) {
+      execution.nativeCodex.model = args.model;
+    }
+  }
+
+  if (provider === "cursor") {
+    execution.nativeCursor.enabled = true;
+    if (args.model) {
+      execution.nativeCursor.model = args.model;
+    }
   }
 
   config.reviewExecution = execution;
@@ -384,9 +402,21 @@ function describeRuntimeReviewConfig(config) {
     providerByMode: config.reviewExecution?.providerByMode ?? {},
     nativeCodex: {
       enabled: config.reviewExecution?.nativeCodex?.enabled ?? false,
+      binary: config.reviewExecution?.nativeCodex?.binary ?? "codex",
       model: config.reviewExecution?.nativeCodex?.model ?? "",
       maxAttempts: config.reviewExecution?.nativeCodex?.maxAttempts ?? 1,
       retryBackoffMs: config.reviewExecution?.nativeCodex?.retryBackoffMs ?? 0
+    },
+    nativeCursor: {
+      enabled: config.reviewExecution?.nativeCursor?.enabled ?? false,
+      binary: config.reviewExecution?.nativeCursor?.binary ?? "cursor",
+      model: config.reviewExecution?.nativeCursor?.model ?? "",
+      mode: config.reviewExecution?.nativeCursor?.mode ?? "ask",
+      sandbox: config.reviewExecution?.nativeCursor?.sandbox ?? "enabled",
+      trustWorkspace: config.reviewExecution?.nativeCursor?.trustWorkspace !== false,
+      force: config.reviewExecution?.nativeCursor?.force === true,
+      maxAttempts: config.reviewExecution?.nativeCursor?.maxAttempts ?? 1,
+      retryBackoffMs: config.reviewExecution?.nativeCursor?.retryBackoffMs ?? 0
     },
     operationRanking: {
       maxAppliedOperations: config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2,

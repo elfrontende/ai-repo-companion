@@ -102,8 +102,21 @@
     },
     "nativeCodex": {
       "enabled": false,
+      "binary": "codex",
       "model": "",
       "sandbox": "workspace-write",
+      "maxAttempts": 2,
+      "retryBackoffMs": 1500,
+      "extraArgs": []
+    },
+    "nativeCursor": {
+      "enabled": false,
+      "binary": "cursor",
+      "model": "",
+      "mode": "ask",
+      "sandbox": "enabled",
+      "trustWorkspace": true,
+      "force": false,
       "maxAttempts": 2,
       "retryBackoffMs": 1500,
       "extraArgs": []
