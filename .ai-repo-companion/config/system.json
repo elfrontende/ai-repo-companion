@@ -97,7 +97,7 @@
     "defaultAdapter": "dry-run",
     "maxJobsPerRun": 3,
     "providerByMode": {
-      "balanced": "codex",
+      "balanced": "cursor",
       "expensive": "codex"
     },
     "nativeCodex": {
@@ -112,7 +112,7 @@
     "reviewProfiles": {
       "balanced": {
         "promptStyle": "light",
-        "maxOperations": 2,
+        "maxOperations": 1,
         "codexReasoningEffort": "medium"
       },
       "expensive": {

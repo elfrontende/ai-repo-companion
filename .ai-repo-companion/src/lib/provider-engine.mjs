@@ -32,7 +32,30 @@ export async function executeReviewPayload(rootDir, payload, config) {
 }
 
 function pickProvider(mode, executionConfig) {
-  return executionConfig.providerByMode?.[mode] ?? "claude";
+  const configuredProvider = executionConfig.providerByMode?.[mode] ?? "claude";
+
+  // Balanced work should prefer Cursor when it is available because that lane
+  // is meant to stay lighter than the expensive Codex path.
+  if (configuredProvider === "cursor") {
+    if (isCursorAvailable(executionConfig)) {
+      return "cursor";
+    }
+    if (isCodexAvailable(executionConfig)) {
+      return "codex";
+    }
+  }
+
+  // Expensive work stays Codex-first. If Codex is unavailable, keep the
+  // configured provider so the caller still gets the expected failure mode.
+  return configuredProvider;
+}
+
+function isCursorAvailable(executionConfig) {
+  return Boolean(executionConfig.nativeCursor?.enabled || executionConfig.commandAdapters?.cursor?.enabled);
+}
+
+function isCodexAvailable(executionConfig) {
+  return Boolean(executionConfig.nativeCodex?.enabled || executionConfig.commandAdapters?.codex?.enabled);
 }
 
 async function executeDryRunAdapter(provider, payload, reviewProfile) {
