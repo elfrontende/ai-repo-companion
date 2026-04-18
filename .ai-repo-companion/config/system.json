@@ -109,6 +109,18 @@
       "retryBackoffMs": 1500,
       "extraArgs": []
     },
+    "reviewProfiles": {
+      "balanced": {
+        "promptStyle": "light",
+        "maxOperations": 2,
+        "codexReasoningEffort": "medium"
+      },
+      "expensive": {
+        "promptStyle": "strict",
+        "maxOperations": 3,
+        "codexReasoningEffort": "high"
+      }
+    },
     "nativeCursor": {
       "enabled": false,
       "binary": "cursor",

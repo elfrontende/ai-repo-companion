@@ -1211,4 +1211,90 @@ assert.equal(cursorExecution.output.parsed.operations[0].noteId, "z-130-backgrou
 assert.ok(cursorExecution.output.args.includes("--mode"));
 assert.ok(cursorExecution.output.args.includes("ask"));
 
+const codexStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-codex-stub-"));
+const codexStubPath = path.join(codexStubDir, "codex-stub.mjs");
+await fs.writeFile(codexStubPath, `#!/usr/bin/env node
+import fs from "node:fs/promises";
+
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf("--output-last-message");
+const outputPath = outputIndex >= 0 ? args[outputIndex + 1] : "";
+
+if (outputPath) {
+  await fs.writeFile(outputPath, JSON.stringify({
+    summary: "Codex light lane returned one compact update.",
+    operations: [
+      {
+        type: "append_note_update",
+        noteId: "z-130-background-memory-sync",
+        sourceNoteId: "",
+        targetNoteId: "",
+        title: "",
+        kind: "",
+        summary: "Balanced reviews can use a lighter prompt and lower reasoning effort.",
+        signals: ["Use a lighter balanced review lane"],
+        tagsToAdd: ["balanced-review"],
+        linksToAdd: ["z-000-index"],
+        tags: [],
+        links: []
+      }
+    ]
+  }, null, 2));
+}
+
+console.log("tokens used");
+console.log("123");
+`, "utf8");
+await fs.chmod(codexStubPath, 0o755);
+
+const codexLightExecution = await executeReviewPayload(tempRoot, {
+  job: {
+    id: "memjob-codex-light-1",
+    mode: "balanced",
+    budget: 300,
+    task: "capture balanced review lane learnings",
+    domains: ["docs", "memory"],
+    reasons: ["Synthetic Codex light-lane test."]
+  },
+  contextBundle: {
+    selectedNotes: [
+      {
+        id: "z-130-background-memory-sync",
+        title: "Background Memory Sync",
+        tags: ["memory", "sync"],
+        snippet: "Background sync should update atomic notes instead of broad summaries."
+      }
+    ]
+  }
+}, {
+  reviewExecution: {
+    providerByMode: {
+      balanced: "codex"
+    },
+    nativeCodex: {
+      enabled: true,
+      binary: codexStubPath,
+      sandbox: "workspace-write",
+      maxAttempts: 1,
+      retryBackoffMs: 0,
+      extraArgs: []
+    },
+    reviewProfiles: {
+      balanced: {
+        promptStyle: "light",
+        maxOperations: 2,
+        codexReasoningEffort: "medium"
+      }
+    }
+  }
+});
+
+assert.equal(codexLightExecution.provider, "codex");
+assert.equal(codexLightExecution.adapter, "codex-native");
+assert.equal(codexLightExecution.status, "completed");
+assert.equal(codexLightExecution.output.usage.totalTokens, 123);
+assert.equal(codexLightExecution.output.reviewProfile.promptStyle, "light");
+assert.ok(codexLightExecution.output.args.includes("-c"));
+assert.ok(codexLightExecution.output.args.includes('model_reasoning_effort="medium"'));
+
 console.log("smoke test passed");

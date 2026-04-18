@@ -418,6 +418,18 @@ function describeRuntimeReviewConfig(config) {
       maxAttempts: config.reviewExecution?.nativeCursor?.maxAttempts ?? 1,
       retryBackoffMs: config.reviewExecution?.nativeCursor?.retryBackoffMs ?? 0
     },
+    reviewProfiles: {
+      balanced: {
+        promptStyle: config.reviewExecution?.reviewProfiles?.balanced?.promptStyle ?? "light",
+        maxOperations: config.reviewExecution?.reviewProfiles?.balanced?.maxOperations ?? 2,
+        codexReasoningEffort: config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium"
+      },
+      expensive: {
+        promptStyle: config.reviewExecution?.reviewProfiles?.expensive?.promptStyle ?? "strict",
+        maxOperations: config.reviewExecution?.reviewProfiles?.expensive?.maxOperations ?? 3,
+        codexReasoningEffort: config.reviewExecution?.reviewProfiles?.expensive?.codexReasoningEffort ?? "high"
+      }
+    },
     operationRanking: {
       maxAppliedOperations: config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2,
       minScore: config.reviewExecution?.operationRanking?.minScore ?? 35
