@@ -131,6 +131,9 @@ const firstMetrics = await summarizeReviewMetrics(tempRoot);
 assert.equal(firstMetrics.counters.processedJobs, 1);
 assert.equal(firstMetrics.counters.completedJobs, 1);
 assert.ok(firstMetrics.topAdapters.some((entry) => entry.key === "dry-run"));
+assert.ok(firstMetrics.cost.estimatedContextTokens > 0);
+assert.equal(firstMetrics.cost.liveTokensUsed, 0);
+assert.ok(firstMetrics.cost.avgEstimatedContextTokensPerRun > 0);
 
 const retentionRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-retention-"));
 await fs.mkdir(path.join(retentionRoot, "state/reviews/reports"), { recursive: true });
@@ -638,6 +641,7 @@ await writeJson(path.join(statusRoot, "state/reviews/metrics.json"), {
 const runtimeStatus = await getRuntimeStatus(statusRoot);
 assert.equal(runtimeStatus.queue.queued, 1);
 assert.equal(runtimeStatus.metrics.counters.processedJobs, 2);
+assert.equal(runtimeStatus.metrics.cost.liveTokensUsed, 0);
 
 const doctorRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-doctor-"));
 await fs.cp(path.resolve("config"), path.join(doctorRoot, "config"), { recursive: true });

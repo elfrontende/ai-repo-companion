@@ -6,7 +6,8 @@ import { readJson, writeJson } from "./store.mjs";
 // analytics system that is harder to understand than the runtime itself.
 
 export async function getReviewMetrics(rootDir) {
-  return readJson(path.join(rootDir, "state/reviews/metrics.json"), createEmptyMetrics());
+  const raw = await readJson(path.join(rootDir, "state/reviews/metrics.json"), createEmptyMetrics());
+  return normalizeMetrics(raw);
 }
 
 export async function recordReviewMetricsEvent(rootDir, event = {}) {
@@ -50,19 +51,41 @@ export async function recordReviewMetricsEvent(rootDir, event = {}) {
 
 export async function summarizeReviewMetrics(rootDir) {
   const metrics = await getReviewMetrics(rootDir);
+  const selectedOperations = metrics.counters.selectedOperations;
+  const appliedOperations = metrics.counters.appliedOperations;
+  const liveTokensUsed = metrics.cost.liveTokensUsed;
   return {
     counters: metrics.counters,
+    cost: {
+      liveTokensUsed,
+      estimatedContextTokens: metrics.cost.estimatedContextTokens,
+      avgTokensPerRun: metrics.counters.processedJobs > 0
+        ? Number((liveTokensUsed / metrics.counters.processedJobs).toFixed(2))
+        : 0,
+      avgTokensPerSelectedOperation: selectedOperations > 0
+        ? Number((liveTokensUsed / selectedOperations).toFixed(2))
+        : 0,
+      avgTokensPerAppliedOperation: appliedOperations > 0
+        ? Number((liveTokensUsed / appliedOperations).toFixed(2))
+        : 0,
+      avgEstimatedContextTokensPerRun: metrics.counters.processedJobs > 0
+        ? Number((metrics.cost.estimatedContextTokens / metrics.counters.processedJobs).toFixed(2))
+        : 0
+    },
     queueLatency: summarizeLatency(metrics.latencies.queueMinutes),
     approvalLatency: summarizeLatency(metrics.latencies.approvalMinutes),
     topAdapters: sortEntries(metrics.byAdapter),
     topModes: sortEntries(metrics.byMode),
+    topTokenAdapters: sortEntries(metrics.tokensByAdapter),
+    topTokenModes: sortEntries(metrics.tokensByMode),
+    topTokenDomains: sortEntries(metrics.tokensByDomain),
     recentEvents: metrics.recentEvents
   };
 }
 
 function createEmptyMetrics() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     updatedAt: null,
     counters: {
       processedJobs: 0,
@@ -75,10 +98,16 @@ function createEmptyMetrics() {
       approvalsExpiredClosed: 0,
       recoveredRuns: 0,
       noteApplyRuns: 0,
+      selectedOperations: 0,
       appliedOperations: 0,
       skippedOperations: 0,
       rejectedOperations: 0,
       deferredOperations: 0
+    },
+    cost: {
+      liveTokensUsed: 0,
+      estimatedContextTokens: 0,
+      liveRunsWithUsage: 0
     },
     latencies: {
       queueMinutes: createLatencyBucket(),
@@ -86,6 +115,10 @@ function createEmptyMetrics() {
     },
     byAdapter: {},
     byMode: {},
+    byDomain: {},
+    tokensByAdapter: {},
+    tokensByMode: {},
+    tokensByDomain: {},
     recentEvents: []
   };
 }
@@ -94,6 +127,9 @@ function applyProcessedReviewMetrics(metrics, event) {
   metrics.counters.processedJobs += 1;
   incrementKey(metrics.byAdapter, event.adapter ?? "unknown");
   incrementKey(metrics.byMode, event.mode ?? "unknown");
+  for (const domain of event.domains ?? []) {
+    incrementKey(metrics.byDomain, domain);
+  }
 
   if (event.status === "completed") {
     metrics.counters.completedJobs += 1;
@@ -110,6 +146,9 @@ function applyProcessedReviewMetrics(metrics, event) {
   }
 
   if (event.noteChanges) {
+    metrics.counters.selectedOperations += Array.isArray(event.noteChanges.selectedOperations)
+      ? event.noteChanges.selectedOperations.length
+      : 0;
     metrics.counters.appliedOperations += Array.isArray(event.noteChanges.applied)
       ? event.noteChanges.applied.length
       : 0;
@@ -125,6 +164,20 @@ function applyProcessedReviewMetrics(metrics, event) {
 
     if (Array.isArray(event.noteChanges.applied) && event.noteChanges.applied.length > 0) {
       metrics.counters.noteApplyRuns += 1;
+    }
+  }
+
+  const tokenUsage = Number(event.execution?.output?.usage?.totalTokens) || 0;
+  const estimatedContextTokens = Number(event.payload?.contextBundle?.usedTokens) || 0;
+
+  metrics.cost.liveTokensUsed += tokenUsage;
+  metrics.cost.estimatedContextTokens += estimatedContextTokens;
+  if (tokenUsage > 0) {
+    metrics.cost.liveRunsWithUsage += 1;
+    incrementBy(metrics.tokensByAdapter, event.adapter ?? "unknown", tokenUsage);
+    incrementBy(metrics.tokensByMode, event.mode ?? "unknown", tokenUsage);
+    for (const domain of event.domains ?? []) {
+      incrementBy(metrics.tokensByDomain, domain, tokenUsage);
     }
   }
 }
@@ -195,8 +248,63 @@ function incrementKey(map, key) {
   map[key] = (map[key] ?? 0) + 1;
 }
 
+function incrementBy(map, key, value) {
+  map[key] = (map[key] ?? 0) + value;
+}
+
 function sortEntries(map) {
   return Object.entries(map)
     .sort((left, right) => right[1] - left[1])
     .map(([key, count]) => ({ key, count }));
+}
+
+function normalizeMetrics(raw) {
+  const defaults = createEmptyMetrics();
+  return {
+    ...defaults,
+    ...raw,
+    counters: {
+      ...defaults.counters,
+      ...(raw?.counters ?? {})
+    },
+    cost: {
+      ...defaults.cost,
+      ...(raw?.cost ?? {})
+    },
+    latencies: {
+      queueMinutes: {
+        ...defaults.latencies.queueMinutes,
+        ...(raw?.latencies?.queueMinutes ?? {})
+      },
+      approvalMinutes: {
+        ...defaults.latencies.approvalMinutes,
+        ...(raw?.latencies?.approvalMinutes ?? {})
+      }
+    },
+    byAdapter: {
+      ...defaults.byAdapter,
+      ...(raw?.byAdapter ?? {})
+    },
+    byMode: {
+      ...defaults.byMode,
+      ...(raw?.byMode ?? {})
+    },
+    byDomain: {
+      ...defaults.byDomain,
+      ...(raw?.byDomain ?? {})
+    },
+    tokensByAdapter: {
+      ...defaults.tokensByAdapter,
+      ...(raw?.tokensByAdapter ?? {})
+    },
+    tokensByMode: {
+      ...defaults.tokensByMode,
+      ...(raw?.tokensByMode ?? {})
+    },
+    tokensByDomain: {
+      ...defaults.tokensByDomain,
+      ...(raw?.tokensByDomain ?? {})
+    },
+    recentEvents: Array.isArray(raw?.recentEvents) ? raw.recentEvents : defaults.recentEvents
+  };
 }

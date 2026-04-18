@@ -170,6 +170,7 @@ Local review observability is enabled by default:
 
 - every processed review run updates `state/reviews/metrics.json`
 - metrics track queue latency, approval latency, apply rate, rejection/defer counts, recovery runs, and approval expiry outcomes
+- metrics now also track live token usage, estimated context load, and token totals by adapter, mode, and domain
 - `node src/cli.mjs metrics` prints a compact local summary for policy tuning
 
 This gives the pipeline enough signal for later tuning without adding any external telemetry dependency.
