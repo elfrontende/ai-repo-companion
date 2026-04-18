@@ -65,13 +65,20 @@ function evaluateOperation(operation, noteIds) {
     if (!noteIds.has(operation.noteId)) {
       return { ok: false, reason: "append_note_update targets an unknown note." };
     }
-    const unknownLinks = normalizeArray(operation.linksToAdd).filter((link) => !noteIds.has(link));
+    const linksToAdd = normalizeArray(operation.linksToAdd);
+    const unknownLinks = linksToAdd.filter((link) => !noteIds.has(link));
     if (unknownLinks.length > 0) {
       return { ok: false, reason: "append_note_update still contains unresolved links." };
     }
+    if (linksToAdd.includes(operation.noteId)) {
+      return { ok: false, reason: "append_note_update cannot add a self-link." };
+    }
+    if (operation.noteId === "z-000-index" && linksToAdd.length === 0) {
+      return { ok: false, reason: "index updates must add at least one outgoing note link." };
+    }
     const hasSignalPayload = normalizeArray(operation.signals).length > 0
       || normalizeArray(operation.tagsToAdd).length > 0
-      || normalizeArray(operation.linksToAdd).length > 0;
+      || linksToAdd.length > 0;
     if (!hasSignalPayload) {
       return { ok: false, reason: "append_note_update adds no signals, tags, or links." };
     }
@@ -88,9 +95,13 @@ function evaluateOperation(operation, noteIds) {
     if (normalizeArray(operation.signals).length === 0) {
       return { ok: false, reason: "merge_note_into_existing needs at least one signal." };
     }
-    const unknownLinks = normalizeArray(operation.linksToAdd).filter((link) => !noteIds.has(link));
+    const linksToAdd = normalizeArray(operation.linksToAdd);
+    const unknownLinks = linksToAdd.filter((link) => !noteIds.has(link));
     if (unknownLinks.length > 0) {
       return { ok: false, reason: "merge_note_into_existing still contains unresolved links." };
+    }
+    if (linksToAdd.includes(operation.targetNoteId)) {
+      return { ok: false, reason: "merge_note_into_existing cannot add a self-link to the target note." };
     }
     return { ok: true };
   }

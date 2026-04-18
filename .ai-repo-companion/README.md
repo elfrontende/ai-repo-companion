@@ -193,6 +193,12 @@ There is now a third local safety layer before the quality gate:
 
 This matters because model outputs are often semantically correct but not graph-safe. The local runtime now prefers fixing those references automatically instead of rejecting the whole review.
 
+The quality gate now also blocks semantically bad links:
+
+- no self-links like `z-000-index -> z-000-index`
+- index updates must point to at least one other note
+- merge updates cannot add the target note as its own extra link
+
 Example config:
 
 ```json
