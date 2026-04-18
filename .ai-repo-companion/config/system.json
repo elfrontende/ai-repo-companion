@@ -124,7 +124,8 @@
     "valueGate": {
       "enabled": true,
       "applyToModes": ["balanced"],
-      "minScore": 60
+      "minScore": 60,
+      "minScoreByDomain": {}
     },
     "nativeCursor": {
       "enabled": false,
@@ -315,7 +316,11 @@
       "tighten-value-gate",
       "relax-value-gate",
       "benchmark-lower-balanced-effort",
-      "benchmark-lean-balanced-operations"
+      "benchmark-lean-balanced-operations",
+      "domain-tighten-value-gate-docs",
+      "domain-tighten-value-gate-deploy",
+      "domain-tighten-value-gate-ui",
+      "domain-tighten-value-gate-testing"
     ]
   }
 }

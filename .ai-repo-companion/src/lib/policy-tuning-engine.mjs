@@ -381,13 +381,21 @@ function buildPolicySuggestions(config, metrics, benchmark) {
   // does not overreact to one noisy day of real runs.
   const balancedVariant = benchmark?.aggregate?.byVariant?.balanced;
   const saverVariant = benchmark?.aggregate?.byVariant?.saver;
+  const domainSignal = buildDomainLeanSignal(
+    benchmark?.aggregate?.byDomain ?? {},
+    config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"]
+  );
 
   maybePushSuggestion(suggestions, {
     id: "benchmark-lower-balanced-effort",
-    condition: benchmark?.aggregate?.cheapestVariant === "saver"
+    condition: (
+      benchmark?.aggregate?.cheapestVariant === "saver"
       && Number(saverVariant?.totalTokens) > 0
-      && Number(balancedVariant?.totalTokens) > Number(saverVariant?.totalTokens) * 1.08,
-    reason: "Synthetic benchmark says the saver profile is clearly cheaper than balanced, so the default balanced Codex reasoning effort can be lowered.",
+      && Number(balancedVariant?.totalTokens) > Number(saverVariant?.totalTokens) * 1.08
+    ) || domainSignal.shouldLeanBalancedLane,
+    reason: domainSignal.shouldLeanBalancedLane
+      ? `Low-risk domains (${domainSignal.matchedDomains.join(", ")}) keep favoring saver, so the default balanced Codex reasoning effort can be lowered without using high-risk benchmark data as the main signal.`
+      : "Synthetic benchmark says the saver profile is clearly cheaper than balanced, so the default balanced Codex reasoning effort can be lowered.",
     path: ["reviewExecution", "reviewProfiles", "balanced", "codexReasoningEffort"],
     currentValue: config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium",
     proposedValue: "low",
@@ -396,17 +404,61 @@ function buildPolicySuggestions(config, metrics, benchmark) {
 
   maybePushSuggestion(suggestions, {
     id: "benchmark-lean-balanced-operations",
-    condition: benchmark?.aggregate?.cheapestVariant === "saver"
+    condition: (
+      benchmark?.aggregate?.cheapestVariant === "saver"
       && Number(saverVariant?.totalTokens) > 0
-      && Number(balancedVariant?.totalTokens) > Number(saverVariant?.totalTokens) * 1.12,
-    reason: "Synthetic benchmark shows balanced is still materially heavier than saver, so its operation budget should shrink toward the cheaper lane.",
+      && Number(balancedVariant?.totalTokens) > Number(saverVariant?.totalTokens) * 1.12
+    ) || domainSignal.shouldLeanBalancedLane,
+    reason: domainSignal.shouldLeanBalancedLane
+      ? `Low-risk domains (${domainSignal.matchedDomains.join(", ")}) still show a meaningfully cheaper saver lane, so balanced should keep a leaner operation budget.`
+      : "Synthetic benchmark shows balanced is still materially heavier than saver, so its operation budget should shrink toward the cheaper lane.",
     path: ["reviewExecution", "reviewProfiles", "balanced", "maxOperations"],
     currentValue: config.reviewExecution?.reviewProfiles?.balanced?.maxOperations ?? 2,
     proposedValue: 1,
     canAutoApply: true
   });
 
+  for (const domain of domainSignal.matchedDomains) {
+    // This is intentionally domain-scoped.
+    // We tighten the cheap balanced lane for docs/deploy/ui/testing without
+    // making auth/security jobs pay for that stricter threshold.
+    const currentStoredValue = config.reviewExecution?.valueGate?.minScoreByDomain?.[domain];
+    const effectiveThreshold = Number(currentStoredValue)
+      || (config.reviewExecution?.valueGate?.minScore ?? 60);
+    maybePushSuggestion(suggestions, {
+      id: `domain-tighten-value-gate-${domain}`,
+      condition: true,
+      reason: `${domain} benchmark samples keep favoring saver over balanced, so this low-risk domain should clear a stricter local value gate before it spends live tokens.`,
+      path: ["reviewExecution", "valueGate", "minScoreByDomain", domain],
+      currentValue: currentStoredValue,
+      proposedValue: Math.min(90, effectiveThreshold + 5),
+      canAutoApply: true
+    });
+  }
+
   return suggestions;
+}
+
+function buildDomainLeanSignal(byDomain, monitoredDomains) {
+  const matchedDomains = [];
+
+  for (const domain of monitoredDomains) {
+    const summary = byDomain?.[domain];
+    if (!summary) {
+      continue;
+    }
+    const saverReduction = Number(summary?.byVariant?.saver?.reductionPercent);
+    const balancedReduction = Number(summary?.byVariant?.balanced?.reductionPercent);
+    const reductionGap = saverReduction - balancedReduction;
+    if (summary?.cheapestVariant === "saver" && Number.isFinite(reductionGap) && reductionGap >= 4) {
+      matchedDomains.push(domain);
+    }
+  }
+
+  return {
+    matchedDomains,
+    shouldLeanBalancedLane: matchedDomains.length >= Math.max(2, Math.ceil(monitoredDomains.length / 2))
+  };
 }
 
 function summarizeBenchmarkForCanary(benchmark) {
@@ -540,7 +592,12 @@ function applyConfigPatch(config, pathSegments, value) {
     cursor[segment] ??= {};
     cursor = cursor[segment];
   }
-  cursor[pathSegments[pathSegments.length - 1]] = value;
+  const leaf = pathSegments[pathSegments.length - 1];
+  if (value === undefined) {
+    delete cursor[leaf];
+    return;
+  }
+  cursor[leaf] = value;
 }
 
 function averageLatency(bucket) {

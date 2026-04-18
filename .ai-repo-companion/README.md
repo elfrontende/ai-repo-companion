@@ -192,6 +192,7 @@ Balanced live reviews now also pass through a local value gate:
 - the worker scores cheap local signals before it calls a live model
 - weak `balanced` jobs are skipped locally with adapter `value-policy`
 - the default threshold is intentionally conservative, so single-task cleanup runs need stronger clustered signals to justify a live call
+- the value gate also supports `minScoreByDomain`, so low-risk domains like docs or deploy can be tightened independently without touching security-heavy jobs
 - this avoids paying live tokens for queue entries that only have shallow support
 
 This is the first layer that saves real live cost by reducing the number of model runs, not just shrinking prompt size.
@@ -227,6 +228,7 @@ Policy tuning is now metrics-aware:
 - if `state/benchmarks/last-benchmark.json` exists, the tuner also compares `saver` vs `balanced` synthetic cost and can recommend lowering balanced reasoning effort or shrinking balanced max operations
 - auto-tune now stores a rollback plan and benchmark snapshot, so a later synthetic benchmark can revert just the last bounded auto-change set instead of leaving a bad tune in place
 - canary rollback can now watch configured low-risk domains like `docs`, `deploy`, `ui`, and `testing`, so heavy `security` work does not hide regressions in the cheaper balanced lane
+- those same cheap domains can now generate bounded `minScoreByDomain` tuning suggestions, so `tune` can tighten only the low-risk balanced lane instead of making one global value-gate jump
 
 This keeps policy iteration lightweight: collect local evidence first, then nudge the config instead of re-guessing thresholds by hand.
 
