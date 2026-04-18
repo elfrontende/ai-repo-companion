@@ -145,10 +145,44 @@ const idempotencyResult = await applyIdempotencyGuard(tempRoot, [
 ], config.reviewExecution.idempotency);
 
 assert.equal(idempotencyResult.passed, true);
-assert.equal(idempotencyResult.accepted.length, 1);
-assert.equal(idempotencyResult.rejected.length, 1);
-assert.equal(idempotencyResult.rejected[0].noteId, "z-110-atomic-notes");
-assert.match(idempotencyResult.rejected[0].reason, /too similar/i);
+assert.equal(idempotencyResult.accepted.length, 2);
+assert.equal(idempotencyResult.rejected.length, 0);
+assert.equal(idempotencyResult.rewritten.length, 1);
+assert.equal(idempotencyResult.rewritten[0].noteId, "z-110-atomic-notes");
+assert.equal(idempotencyResult.accepted[0].type, "append_note_update");
+assert.equal(idempotencyResult.accepted[0].noteId, "z-110-atomic-notes");
+assert.ok(!idempotencyResult.accepted[0].linksToAdd.includes("z-110-atomic-notes"));
+assert.match(idempotencyResult.rewritten[0].reason, /rewrote duplicate create_note/i);
+
+const hardRejectIdempotencyResult = await applyIdempotencyGuard(tempRoot, [
+  {
+    type: "create_note",
+    noteId: "",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "Atomic Zettelkasten notes",
+    kind: "principle",
+    summary: "Atomic Zettelkasten notes should stay small, linkable, and easy to retrieve with narrow context bundles.",
+    signals: [
+      "Keep each note focused on one durable idea",
+      "Prefer small linked notes over large summaries"
+    ],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: ["zettelkasten", "notes", "atomic", "linking"],
+    links: ["z-000-index"]
+  }
+], {
+  ...config.reviewExecution.idempotency,
+  rewriteDuplicatesToAppendUpdate: false
+});
+
+assert.equal(hardRejectIdempotencyResult.passed, false);
+assert.equal(hardRejectIdempotencyResult.accepted.length, 0);
+assert.equal(hardRejectIdempotencyResult.rewritten.length, 0);
+assert.equal(hardRejectIdempotencyResult.rejected.length, 1);
+assert.equal(hardRejectIdempotencyResult.rejected[0].noteId, "z-110-atomic-notes");
+assert.match(hardRejectIdempotencyResult.rejected[0].reason, /too similar/i);
 
 const applyResult = await applyReviewOperations(tempRoot, [
   {

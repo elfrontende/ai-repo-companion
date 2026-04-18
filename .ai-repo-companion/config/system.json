@@ -113,7 +113,8 @@
       "minScore": 35
     },
     "idempotency": {
-      "minSimilarityScore": 7
+      "minSimilarityScore": 7,
+      "rewriteDuplicatesToAppendUpdate": true
     },
     "commandAdapters": {
       "claude": {

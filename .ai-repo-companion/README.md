@@ -212,9 +212,20 @@ Current defaults:
 
 There is now one more local guard after quality checks:
 
-- idempotency guard: if Codex proposes a `create_note` that is too similar to an existing note, the runtime rejects it instead of creating a near-duplicate review note on every neighboring run
+- idempotency guard: if Codex proposes a `create_note` that is too similar to an existing note, the runtime now rewrites it into an `append_note_update` for that note instead of creating a near-duplicate review note on every neighboring run
 
 This keeps the graph cleaner when the model keeps rediscovering the same durable idea with slightly different wording.
+
+If you want the stricter old behavior, set:
+
+```json
+"idempotency": {
+  "minSimilarityScore": 7,
+  "rewriteDuplicatesToAppendUpdate": false
+}
+```
+
+In strict mode, duplicate `create_note` operations are rejected instead of being rewritten.
 
 Example config:
 
