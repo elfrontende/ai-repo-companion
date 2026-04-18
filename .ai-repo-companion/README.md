@@ -187,6 +187,12 @@ Quality gate rules are intentionally simple:
 
 If all operations fail the gate, the review run is still reported, but no note files are modified.
 
+There is now a third local safety layer before the quality gate:
+
+- link normalization: if Codex returns a note title like `Atomic Zettelkasten notes` instead of a note id like `z-110-atomic-notes`, the worker tries to resolve it locally before quality checks run
+
+This matters because model outputs are often semantically correct but not graph-safe. The local runtime now prefers fixing those references automatically instead of rejecting the whole review.
+
 Example config:
 
 ```json

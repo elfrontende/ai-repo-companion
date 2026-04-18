@@ -65,6 +65,10 @@ function evaluateOperation(operation, noteIds) {
     if (!noteIds.has(operation.noteId)) {
       return { ok: false, reason: "append_note_update targets an unknown note." };
     }
+    const unknownLinks = normalizeArray(operation.linksToAdd).filter((link) => !noteIds.has(link));
+    if (unknownLinks.length > 0) {
+      return { ok: false, reason: "append_note_update still contains unresolved links." };
+    }
     const hasSignalPayload = normalizeArray(operation.signals).length > 0
       || normalizeArray(operation.tagsToAdd).length > 0
       || normalizeArray(operation.linksToAdd).length > 0;
@@ -83,6 +87,10 @@ function evaluateOperation(operation, noteIds) {
     }
     if (normalizeArray(operation.signals).length === 0) {
       return { ok: false, reason: "merge_note_into_existing needs at least one signal." };
+    }
+    const unknownLinks = normalizeArray(operation.linksToAdd).filter((link) => !noteIds.has(link));
+    if (unknownLinks.length > 0) {
+      return { ok: false, reason: "merge_note_into_existing still contains unresolved links." };
     }
     return { ok: true };
   }
