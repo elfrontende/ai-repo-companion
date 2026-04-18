@@ -40,12 +40,76 @@ export async function processReviewQueue(rootDir, config, options = {}) {
   const processed = [];
 
   for (const job of jobs) {
+    const staleness = assessReviewJobStaleness(job, config.reviewExecution?.staleJobs ?? {});
+
+    if (staleness.action === "skip") {
+      const finishedAt = new Date().toISOString();
+      const report = {
+        job,
+        payload: {
+          job,
+          contextBundle: null
+        },
+        execution: {
+          provider: "local",
+          adapter: "stale-policy",
+          status: "skipped",
+          output: {
+            reason: "Review job exceeded the maximum allowed age and was skipped by stale-job policy."
+          }
+        },
+        noteChanges: {
+          applied: [],
+          skipped: [],
+          reason: "Review job was skipped because it became too old for a live run."
+        },
+        staleness,
+        finishedAt
+      };
+      const reportPath = await persistReviewReport(rootDir, job.id, report);
+
+      job.status = "completed";
+      job.finishedAt = finishedAt;
+      job.reportPath = reportPath;
+      job.execution = {
+        provider: "local",
+        adapter: "stale-policy",
+        status: "skipped"
+      };
+      job.staleness = staleness;
+
+      releaseQueuedSlots(policyState, job.domains);
+
+      await appendLine(historyPath, JSON.stringify({
+        id: job.id,
+        at: finishedAt,
+        status: job.status,
+        provider: "local",
+        adapter: "stale-policy",
+        reportPath
+      }));
+
+      processed.push({
+        id: job.id,
+        status: job.status,
+        reportPath,
+        provider: "local",
+        adapter: "stale-policy",
+        noteChanges: report.noteChanges
+      });
+
+      await writeJson(queuePath, queue);
+      await writeJson(policyStatePath, policyState);
+      continue;
+    }
+
     job.status = "running";
     job.startedAt = new Date().toISOString();
+    job.staleness = staleness;
     await writeJson(queuePath, queue);
 
     try {
-      const payload = await buildReviewPayload(rootDir, job);
+      const payload = await buildReviewPayload(rootDir, job, staleness);
       const effectiveConfig = options.reviewConfig ?? config;
       const execution = await executeReviewPayload(rootDir, payload, effectiveConfig);
       const finishedAt = new Date().toISOString();
@@ -55,6 +119,7 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         payload,
         execution,
         noteChanges,
+        staleness,
         finishedAt
       };
       const reportPath = await persistReviewReport(rootDir, job.id, report);
@@ -125,7 +190,69 @@ async function buildReviewPayload(rootDir, job) {
 
   return {
     job,
+    staleness: job.staleness ?? null,
     contextBundle
+  };
+}
+
+function assessReviewJobStaleness(job, config = {}) {
+  const policy = {
+    enabled: config.enabled !== false,
+    staleAfterMinutes: Math.max(1, Number(config.staleAfterMinutes) || 60),
+    maxAgeMinutes: Math.max(1, Number(config.maxAgeMinutes) || 240),
+    skipExpired: config.skipExpired !== false
+  };
+
+  if (!policy.enabled) {
+    return {
+      enabled: false,
+      level: "fresh",
+      ageMinutes: 0,
+      action: "process"
+    };
+  }
+
+  const referenceTime = job.lastCompactedAt ?? job.createdAt;
+  const createdAtMs = Date.parse(referenceTime);
+  if (!Number.isFinite(createdAtMs)) {
+    return {
+      enabled: true,
+      level: "fresh",
+      ageMinutes: 0,
+      action: "process"
+    };
+  }
+
+  const ageMinutes = Math.max(0, Math.floor((Date.now() - createdAtMs) / 60000));
+  if (ageMinutes >= policy.maxAgeMinutes && policy.skipExpired) {
+    return {
+      enabled: true,
+      level: "expired",
+      ageMinutes,
+      staleAfterMinutes: policy.staleAfterMinutes,
+      maxAgeMinutes: policy.maxAgeMinutes,
+      action: "skip"
+    };
+  }
+
+  if (ageMinutes >= policy.staleAfterMinutes) {
+    return {
+      enabled: true,
+      level: "stale",
+      ageMinutes,
+      staleAfterMinutes: policy.staleAfterMinutes,
+      maxAgeMinutes: policy.maxAgeMinutes,
+      action: "process"
+    };
+  }
+
+  return {
+    enabled: true,
+    level: "fresh",
+    ageMinutes,
+    staleAfterMinutes: policy.staleAfterMinutes,
+    maxAgeMinutes: policy.maxAgeMinutes,
+    action: "process"
   };
 }
 
