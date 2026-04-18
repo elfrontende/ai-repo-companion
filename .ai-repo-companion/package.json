@@ -10,6 +10,7 @@
     "policy": "node src/cli.mjs policy",
     "context": "node src/cli.mjs context",
     "sync": "node src/cli.mjs sync",
+    "task": "node src/cli.mjs task",
     "queue": "node src/cli.mjs queue",
     "review": "node src/cli.mjs review",
     "worker": "node src/cli.mjs worker",
