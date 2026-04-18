@@ -936,10 +936,14 @@ await fs.cp(path.resolve("notes"), path.join(benchmarkRoot, "notes"), { recursiv
 await fs.cp(path.resolve("state"), path.join(benchmarkRoot, "state"), { recursive: true });
 await ensureWorkspace(benchmarkRoot);
 
-const benchmarkResult = await runSyntheticBenchmark(
-  benchmarkRoot,
-  await readJson(path.join(benchmarkRoot, "config/system.json"), {})
-);
+const benchmarkConfig = await readJson(path.join(benchmarkRoot, "config/system.json"), {});
+benchmarkConfig.tuning.benchmarkHistoryRetentionEntries = 3;
+benchmarkConfig.tuning.benchmarkTrendWindow = 3;
+
+let benchmarkResult;
+for (let index = 0; index < 4; index += 1) {
+  benchmarkResult = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig);
+}
 assert.equal(benchmarkResult.report.tasks.length, 5);
 assert.ok(benchmarkResult.report.aggregate.tokensSaved > 0);
 assert.ok(benchmarkResult.report.tasks.some((task) => task.savings.tokensSaved > 0));
@@ -950,6 +954,12 @@ assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.strict));
 const benchmarkReport = await readJson(path.join(benchmarkRoot, "state/benchmarks/last-benchmark.json"), null);
 assert.equal(benchmarkReport.aggregate.taskCount, 5);
 assert.ok(benchmarkReport.aggregate.byVariant.balanced.totalTokens > 0);
+assert.equal(benchmarkReport.trend.historyEntries, 3);
+assert.equal(benchmarkReport.trend.cheapestVariantStreak.variant, "saver");
+assert.equal(benchmarkReport.trend.cheapestVariantStreak.count, 3);
+assert.match(benchmarkReport.trend.recommendation, /Saver has been the cheapest variant/i);
+const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
+assert.equal(benchmarkHistory.trim().split("\n").length, 3);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

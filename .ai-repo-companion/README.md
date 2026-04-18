@@ -212,6 +212,7 @@ Synthetic validation is built in too:
 - `node src/cli.mjs benchmark` runs a small local suite of tasks with mixed difficulty
 - each sample compares `saver`, `balanced`, and `strict` system variants against a naive `baseline` that always drags the full note set
 - reports are written to `state/benchmarks/last-benchmark.json`
+- benchmark history is appended to `state/benchmarks/history.jsonl`, trimmed by retention, and summarized into a trend block with cheapest-variant streaks and simple recommendations
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 
