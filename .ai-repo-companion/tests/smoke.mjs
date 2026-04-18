@@ -16,6 +16,7 @@ import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
 import { evaluateReviewOperations } from "../src/lib/review-quality-engine.mjs";
 import { normalizeReviewOperations } from "../src/lib/review-normalization-engine.mjs";
 import { rankReviewOperations } from "../src/lib/review-ranking-engine.mjs";
+import { applyIdempotencyGuard } from "../src/lib/review-idempotency-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -105,6 +106,49 @@ assert.ok(reviewReport.execution.output.prompt.includes("Review mode: expensive"
 
 const historyRaw = await fs.readFile(path.join(tempRoot, "state/reviews/history.jsonl"), "utf8");
 assert.ok(historyRaw.includes("\"adapter\":\"dry-run\""));
+
+const idempotencyResult = await applyIdempotencyGuard(tempRoot, [
+  {
+    type: "create_note",
+    noteId: "",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "Atomic Zettelkasten notes",
+    kind: "principle",
+    summary: "Atomic Zettelkasten notes should stay small, linkable, and easy to retrieve with narrow context bundles.",
+    signals: [
+      "Keep each note focused on one durable idea",
+      "Prefer small linked notes over large summaries"
+    ],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: ["zettelkasten", "notes", "atomic", "linking"],
+    links: ["z-000-index"]
+  },
+  {
+    type: "create_note",
+    noteId: "",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "Review worker contract snapshots",
+    kind: "decision",
+    summary: "Review workers should snapshot the contract they validated so later reruns can explain why a note update was accepted.",
+    signals: [
+      "Persist the validated review contract",
+      "Make reruns explainable across worker revisions"
+    ],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: ["review-worker", "contracts"],
+    links: ["z-130-background-memory-sync"]
+  }
+], config.reviewExecution.idempotency);
+
+assert.equal(idempotencyResult.passed, true);
+assert.equal(idempotencyResult.accepted.length, 1);
+assert.equal(idempotencyResult.rejected.length, 1);
+assert.equal(idempotencyResult.rejected[0].noteId, "z-110-atomic-notes");
+assert.match(idempotencyResult.rejected[0].reason, /too similar/i);
 
 const applyResult = await applyReviewOperations(tempRoot, [
   {

@@ -112,6 +112,9 @@
       "maxAppliedOperations": 2,
       "minScore": 35
     },
+    "idempotency": {
+      "minSimilarityScore": 7
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,

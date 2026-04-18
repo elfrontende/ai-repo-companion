@@ -210,6 +210,12 @@ Current defaults:
 - `maxAppliedOperations`: `2`
 - `minScore`: `35`
 
+There is now one more local guard after quality checks:
+
+- idempotency guard: if Codex proposes a `create_note` that is too similar to an existing note, the runtime rejects it instead of creating a near-duplicate review note on every neighboring run
+
+This keeps the graph cleaner when the model keeps rediscovering the same durable idea with slightly different wording.
+
 Example config:
 
 ```json
