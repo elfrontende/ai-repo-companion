@@ -35,6 +35,7 @@ npm run sync -- --task "design a migration-safe auth refactor" --summary "Split 
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow --live
 npm run queue
+npm run metrics
 npm run review -- --maxJobs 1
 npm run worker -- --maxJobs 1
 npm test
@@ -75,6 +76,7 @@ Persistent policy state lives in:
 - `state/memory/review-queue.json` for queued memory review jobs
 - `state/reviews/history.jsonl` for executed review runs
 - `state/reviews/reports/` for per-job execution reports
+- `state/reviews/metrics.json` for local observability counters and latency summaries
 
 ## Typical flow
 
@@ -156,6 +158,14 @@ Review retention is also enabled by default:
 - current queue items are not touched, so retention only limits past execution artifacts
 
 This keeps the local review trail bounded without letting report files and history logs grow forever.
+
+Local review observability is enabled by default:
+
+- every processed review run updates `state/reviews/metrics.json`
+- metrics track queue latency, approval latency, apply rate, rejection/defer counts, recovery runs, and approval expiry outcomes
+- `node src/cli.mjs metrics` prints a compact local summary for policy tuning
+
+This gives the pipeline enough signal for later tuning without adding any external telemetry dependency.
 
 Review recovery is enabled by default too:
 

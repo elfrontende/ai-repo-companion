@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": null,
+  "counters": {
+    "processedJobs": 0,
+    "completedJobs": 0,
+    "failedJobs": 0,
+    "skippedJobs": 0,
+    "awaitingApprovalJobs": 0,
+    "approvalsApplied": 0,
+    "approvalsExpiredRequeued": 0,
+    "approvalsExpiredClosed": 0,
+    "recoveredRuns": 0,
+    "noteApplyRuns": 0,
+    "appliedOperations": 0,
+    "skippedOperations": 0,
+    "rejectedOperations": 0,
+    "deferredOperations": 0
+  },
+  "latencies": {
+    "queueMinutes": {
+      "count": 0,
+      "total": 0,
+      "max": 0,
+      "last": 0
+    },
+    "approvalMinutes": {
+      "count": 0,
+      "total": 0,
+      "max": 0,
+      "last": 0
+    }
+  },
+  "byAdapter": {},
+  "byMode": {},
+  "recentEvents": []
+}

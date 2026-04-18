@@ -19,6 +19,7 @@ import {
   completeReviewApplyRecovery,
   recoverInterruptedReviewRun
 } from "./review-recovery-engine.mjs";
+import { recordReviewMetricsEvent } from "./review-metrics-engine.mjs";
 
 // The review worker consumes queued memory jobs.
 // It is intentionally separate from the main sync path so background review
@@ -120,6 +121,17 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         status: job.status,
         reportPath,
         provider: "local",
+        adapter: "stale-policy",
+        noteChanges: report.noteChanges
+      });
+      await recordReviewMetricsEvent(rootDir, {
+        type: "review-processed",
+        at: finishedAt,
+        jobId: job.id,
+        mode: job.mode,
+        createdAt: job.createdAt,
+        finishedAt,
+        status: job.status,
         adapter: "stale-policy",
         noteChanges: report.noteChanges
       });
@@ -270,6 +282,17 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         adapter: execution.adapter,
         noteChanges
       });
+      await recordReviewMetricsEvent(rootDir, {
+        type: "review-processed",
+        at: finishedAt,
+        jobId: job.id,
+        mode: job.mode,
+        createdAt: job.createdAt,
+        finishedAt,
+        status: job.status,
+        adapter: execution.adapter,
+        noteChanges
+      });
     } catch (error) {
       job.status = "failed";
       job.finishedAt = new Date().toISOString();
@@ -278,6 +301,21 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         id: job.id,
         status: "failed",
         error: error.message
+      });
+      await recordReviewMetricsEvent(rootDir, {
+        type: "review-processed",
+        at: job.finishedAt,
+        jobId: job.id,
+        mode: job.mode,
+        createdAt: job.createdAt,
+        finishedAt: job.finishedAt,
+        status: "failed",
+        adapter: job.execution?.adapter ?? "unknown",
+        noteChanges: {
+          applied: [],
+          skipped: [],
+          reason: error.message
+        }
       });
     }
 

@@ -6,6 +6,7 @@ import {
   beginReviewApplyRecovery,
   completeReviewApplyRecovery
 } from "./review-recovery-engine.mjs";
+import { recordReviewMetricsEvent } from "./review-metrics-engine.mjs";
 
 // Approval policy is the explicit "human checkpoint" for sensitive review runs.
 // The worker can still do the expensive thinking, but note writes wait until a
@@ -158,6 +159,15 @@ export async function applyApprovalExpiryPolicy(rootDir, queue, historyPath, con
       adapter: "approval-expiry-policy",
       reportPath: job.reportPath ?? null
     }));
+    await recordReviewMetricsEvent(rootDir, {
+      type: "approval-expired",
+      at: expiredAt,
+      jobId: job.id,
+      mode: job.mode,
+      status: "expired",
+      action: policy.onExpired,
+      ageMinutes
+    });
 
     await fs.rm(approvalPath, { force: true }).catch(() => {});
   }
@@ -241,6 +251,15 @@ export async function approveReviewJob(rootDir, jobId, config = {}) {
     adapter: "approval-policy",
     reportPath: job.reportPath
   }));
+  await recordReviewMetricsEvent(rootDir, {
+    type: "approval-applied",
+    at: timestamp,
+    jobId: job.id,
+    mode: job.mode,
+    status: "approved",
+    pendingAt: approvalRequest.createdAt ?? job.approval?.pendingAt ?? job.finishedAt,
+    approvedAt: timestamp
+  });
   await fs.rm(approvalPath, { force: true }).catch(() => {});
 
   return {
