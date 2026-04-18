@@ -1,5 +1,6 @@
+import fs from "node:fs/promises";
 import path from "node:path";
-import { appendLine, readJson, writeJson } from "./store.mjs";
+import { appendLine, listFiles, readJson, writeJson } from "./store.mjs";
 import { assembleContext, loadNotes } from "./context-engine.mjs";
 import { executeReviewPayload, persistReviewReport } from "./provider-engine.mjs";
 import { applyReviewOperations } from "./review-note-engine.mjs";
@@ -169,9 +170,64 @@ export async function processReviewQueue(rootDir, config, options = {}) {
     await writeJson(policyStatePath, policyState);
   }
 
+  const retention = await applyReviewRetention(rootDir, config.reviewExecution?.retention ?? {});
+
   return {
     processedCount: processed.length,
-    processed
+    processed,
+    retention
+  };
+}
+
+export async function applyReviewRetention(rootDir, config = {}) {
+  const retentionConfig = {
+    enabled: config.enabled !== false,
+    maxReportFiles: Math.max(1, Number(config.maxReportFiles) || 25),
+    maxHistoryEntries: Math.max(1, Number(config.maxHistoryEntries) || 200)
+  };
+
+  if (!retentionConfig.enabled) {
+    return {
+      enabled: false,
+      deletedReportCount: 0,
+      trimmedHistoryEntries: 0,
+      remainingReportCount: 0,
+      remainingHistoryEntries: 0
+    };
+  }
+
+  const reportsDir = path.join(rootDir, "state/reviews/reports");
+  const historyPath = path.join(rootDir, "state/reviews/history.jsonl");
+
+  // Report retention is filename-based because report names are timestamped.
+  // Oldest report files sort first, so trimming from the front is stable and
+  // easy to understand for someone inspecting the folder manually.
+  const reportFiles = await listFiles(reportsDir, ".json");
+  const reportsToDelete = reportFiles.slice(0, Math.max(0, reportFiles.length - retentionConfig.maxReportFiles));
+  for (const reportFile of reportsToDelete) {
+    await fs.rm(reportFile, { force: true });
+  }
+
+  const historyRaw = await fs.readFile(historyPath, "utf8").catch(() => "");
+  const historyLines = historyRaw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const retainedHistory = historyLines.slice(-retentionConfig.maxHistoryEntries);
+  const trimmedHistoryEntries = historyLines.length - retainedHistory.length;
+
+  if (trimmedHistoryEntries > 0) {
+    const nextHistory = retainedHistory.length > 0 ? `${retainedHistory.join("\n")}\n` : "";
+    await fs.writeFile(historyPath, nextHistory, "utf8");
+  }
+
+  return {
+    enabled: true,
+    config: retentionConfig,
+    deletedReportCount: reportsToDelete.length,
+    trimmedHistoryEntries,
+    remainingReportCount: reportFiles.length - reportsToDelete.length,
+    remainingHistoryEntries: retainedHistory.length
   };
 }
 

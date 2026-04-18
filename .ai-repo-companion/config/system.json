@@ -127,6 +127,11 @@
       "maxAgeMinutes": 240,
       "skipExpired": true
     },
+    "retention": {
+      "enabled": true,
+      "maxReportFiles": 25,
+      "maxHistoryEntries": 200
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,
