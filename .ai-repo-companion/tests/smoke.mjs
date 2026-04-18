@@ -839,13 +839,52 @@ await writeJson(path.join(statusRoot, "state/reviews/metrics.json"), {
   byMode: { balanced: 2 },
   recentEvents: []
 });
+await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
+  generatedAt: new Date().toISOString(),
+  aggregate: {
+    taskCount: 5,
+    cheapestVariant: "saver",
+    byVariant: {
+      saver: {
+        totalTokens: 4200,
+        tokensSaved: 3800,
+        reductionPercent: 47.5
+      },
+      balanced: {
+        totalTokens: 4900,
+        tokensSaved: 3100,
+        reductionPercent: 38.75
+      }
+    }
+  }
+});
+await writeJson(path.join(statusRoot, "state/tuning/last-tuning.json"), {
+  generatedAt: new Date(Date.now() - 16 * 60 * 60 * 1000).toISOString(),
+  mode: "auto",
+  applied: [
+    {
+      id: "tighten-value-gate"
+    }
+  ],
+  blocked: []
+});
 
-const runtimeStatus = await getRuntimeStatus(statusRoot);
+const statusConfig = await readJson(path.join(statusRoot, "config/system.json"), {});
+const runtimeStatus = await getRuntimeStatus(statusRoot, statusConfig);
 assert.equal(runtimeStatus.queue.queued, 1);
 assert.equal(runtimeStatus.metrics.counters.processedJobs, 2);
 assert.equal(runtimeStatus.metrics.cost.liveTokensUsed, 0);
 assert.equal(runtimeStatus.costSummary.queuePressure.balancedQueued, 1);
+assert.equal(runtimeStatus.benchmarkSummary.loaded, true);
+assert.equal(runtimeStatus.benchmarkSummary.cheapestVariant, "saver");
+assert.equal(runtimeStatus.tuningSummary.loaded, true);
+assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
+
+const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
+assert.equal(runtimeDoctor.ok, true);
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "balanced-lane-heavier-than-benchmark"));
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "auto-tune-stale"));
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
