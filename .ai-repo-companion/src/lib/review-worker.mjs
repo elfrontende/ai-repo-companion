@@ -5,6 +5,7 @@ import { executeReviewPayload, persistReviewReport } from "./provider-engine.mjs
 import { applyReviewOperations } from "./review-note-engine.mjs";
 import { evaluateReviewOperations } from "./review-quality-engine.mjs";
 import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
+import { rankReviewOperations } from "./review-ranking-engine.mjs";
 
 // The review worker consumes queued memory jobs.
 // It is intentionally separate from the main sync path so background review
@@ -47,7 +48,7 @@ export async function processReviewQueue(rootDir, config, options = {}) {
       const effectiveConfig = options.reviewConfig ?? config;
       const execution = await executeReviewPayload(rootDir, payload, effectiveConfig);
       const finishedAt = new Date().toISOString();
-      const noteChanges = await maybeApplyReviewOperations(rootDir, execution, finishedAt);
+      const noteChanges = await maybeApplyReviewOperations(rootDir, execution, effectiveConfig, finishedAt);
       const report = {
         job,
         payload,
@@ -134,7 +135,7 @@ function releaseQueuedSlots(policyState, domains) {
   }
 }
 
-async function maybeApplyReviewOperations(rootDir, execution, timestamp) {
+async function maybeApplyReviewOperations(rootDir, execution, config, timestamp) {
   const operations = execution.output?.parsed?.operations;
   if (!Array.isArray(operations) || operations.length === 0) {
     return {
@@ -162,10 +163,27 @@ async function maybeApplyReviewOperations(rootDir, execution, timestamp) {
     };
   }
 
-  const appliedResult = await applyReviewOperations(rootDir, qualityGate.accepted, { timestamp });
+  const ranking = await rankReviewOperations(
+    rootDir,
+    qualityGate.accepted,
+    config.reviewExecution?.operationRanking ?? {}
+  );
+  if (!ranking.passed) {
+    return {
+      normalization: normalized,
+      qualityGate,
+      ranking,
+      applied: [],
+      skipped: ranking.deferred,
+      reason: ranking.reason
+    };
+  }
+
+  const appliedResult = await applyReviewOperations(rootDir, ranking.selected, { timestamp });
   return {
     normalization: normalized,
     qualityGate,
+    ranking,
     ...appliedResult
   };
 }

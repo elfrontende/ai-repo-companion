@@ -199,6 +199,17 @@ The quality gate now also blocks semantically bad links:
 - index updates must point to at least one other note
 - merge updates cannot add the target note as its own extra link
 
+After normalization and quality checks, the runtime now ranks accepted operations before apply:
+
+- durable note creation is preferred over lightweight index edits
+- architectural and decision notes score higher than generic updates
+- low-value but still valid updates can be deferred when the apply budget is exhausted
+
+Current defaults:
+
+- `maxAppliedOperations`: `2`
+- `minScore`: `35`
+
 Example config:
 
 ```json
