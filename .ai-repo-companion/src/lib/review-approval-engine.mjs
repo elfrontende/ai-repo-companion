@@ -40,9 +40,10 @@ export function assessReviewApprovalRequirement(job, config = {}) {
 
 export async function createApprovalRequest(rootDir, job, reportPath, notePlan, decision) {
   const approvalPath = path.join(rootDir, "state/reviews/approvals", `${job.id}.json`);
+  const createdAt = new Date().toISOString();
   const request = {
     id: job.id,
-    createdAt: new Date().toISOString(),
+    createdAt,
     jobId: job.id,
     jobMode: job.mode,
     domains: job.domains ?? [],
@@ -55,6 +56,118 @@ export async function createApprovalRequest(rootDir, job, reportPath, notePlan, 
   return {
     approvalPath,
     request
+  };
+}
+
+export async function applyApprovalExpiryPolicy(rootDir, queue, historyPath, config = {}) {
+  const policy = normalizeApprovalConfig(config);
+  if (!policy.enabled || policy.pendingApprovalTtlMinutes <= 0) {
+    return {
+      checked: 0,
+      expired: 0,
+      requeued: 0,
+      completed: 0,
+      changed: false
+    };
+  }
+
+  let expired = 0;
+  let requeued = 0;
+  let completed = 0;
+  let changed = false;
+  const checkedJobs = queue.filter((job) => job.status === "awaiting-approval");
+
+  for (const job of checkedJobs) {
+    const pendingAt = job.approval?.pendingAt ?? job.finishedAt ?? job.createdAt;
+    const pendingAtMs = Date.parse(pendingAt);
+    if (!Number.isFinite(pendingAtMs)) {
+      continue;
+    }
+
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - pendingAtMs) / 60000));
+    if (ageMinutes < policy.pendingApprovalTtlMinutes) {
+      continue;
+    }
+
+    expired += 1;
+    changed = true;
+    const expiredAt = new Date().toISOString();
+    const approvalPath = path.join(rootDir, "state/reviews/approvals", `${job.id}.json`);
+    const report = await readJson(job.reportPath, null);
+
+    if (policy.onExpired === "requeue") {
+      job.status = "queued";
+      job.startedAt = null;
+      job.finishedAt = null;
+      job.approval = {
+        status: "expired",
+        expiredAt,
+        action: "requeue",
+        reason: "Pending approval exceeded the configured TTL, so the job was re-queued for a fresh review pass."
+      };
+      job.approvalExpiry = {
+        expiredAt,
+        ageMinutes,
+        action: "requeue"
+      };
+      requeued += 1;
+    } else {
+      job.status = "completed";
+      job.finishedAt = expiredAt;
+      job.approval = {
+        status: "expired",
+        expiredAt,
+        action: "expire",
+        reason: "Pending approval exceeded the configured TTL and was closed without applying note changes."
+      };
+      job.approvalExpiry = {
+        expiredAt,
+        ageMinutes,
+        action: "expire"
+      };
+      completed += 1;
+    }
+
+    if (report) {
+      report.noteChanges = {
+        ...(report.noteChanges ?? {}),
+        approval: {
+          ...(report.noteChanges?.approval ?? {}),
+          status: "expired",
+          expiredAt,
+          ageMinutes,
+          action: policy.onExpired
+        },
+        reason: policy.onExpired === "requeue"
+          ? "Pending approval expired and the review job was re-queued for a fresh run."
+          : "Pending approval expired and the review job was closed without local note apply."
+      };
+      report.approvalExpiry = {
+        expiredAt,
+        ageMinutes,
+        action: policy.onExpired
+      };
+      await writeJson(job.reportPath, report);
+    }
+
+    await appendLine(historyPath, JSON.stringify({
+      id: job.id,
+      at: expiredAt,
+      status: policy.onExpired === "requeue" ? "approval-expired-requeued" : "approval-expired",
+      provider: "local",
+      adapter: "approval-expiry-policy",
+      reportPath: job.reportPath ?? null
+    }));
+
+    await fs.rm(approvalPath, { force: true }).catch(() => {});
+  }
+
+  return {
+    checked: checkedJobs.length,
+    expired,
+    requeued,
+    completed,
+    changed
   };
 }
 
@@ -144,6 +257,8 @@ function normalizeApprovalConfig(config = {}) {
     enabled: config.enabled !== false,
     strategy: config.strategy ?? "suggest-only",
     requireForModes: Array.isArray(config.requireForModes) ? config.requireForModes : ["expensive"],
-    requireForDomains: Array.isArray(config.requireForDomains) ? config.requireForDomains : ["security"]
+    requireForDomains: Array.isArray(config.requireForDomains) ? config.requireForDomains : ["security"],
+    pendingApprovalTtlMinutes: Math.max(0, Number(config.pendingApprovalTtlMinutes) || 240),
+    onExpired: config.onExpired === "expire" ? "expire" : "requeue"
   };
 }

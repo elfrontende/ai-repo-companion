@@ -174,6 +174,14 @@ Review approval is now enabled by default for sensitive runs:
 
 This gives high-risk review runs a manual checkpoint without losing the rest of the automated Codex-first pipeline.
 
+Pending approvals are also time-bounded now:
+
+- `pendingApprovalTtlMinutes` controls how long a job may wait in `awaiting-approval`
+- `onExpired: "requeue"` is the default and sends the job back through a fresh review pass
+- `onExpired: "expire"` closes the pending approval without applying note changes
+
+This prevents old approval snapshots from sitting around until they no longer match the current note graph.
+
 ## Codex first
 
 The first native provider path is Codex.

@@ -349,7 +349,9 @@ function describeRuntimeReviewConfig(config) {
       enabled: config.reviewExecution?.approval?.enabled !== false,
       strategy: config.reviewExecution?.approval?.strategy ?? "suggest-only",
       requireForModes: config.reviewExecution?.approval?.requireForModes ?? ["expensive"],
-      requireForDomains: config.reviewExecution?.approval?.requireForDomains ?? ["security"]
+      requireForDomains: config.reviewExecution?.approval?.requireForDomains ?? ["security"],
+      pendingApprovalTtlMinutes: config.reviewExecution?.approval?.pendingApprovalTtlMinutes ?? 240,
+      onExpired: config.reviewExecution?.approval?.onExpired === "expire" ? "expire" : "requeue"
     },
     recovery: {
       enabled: config.reviewExecution?.recovery?.enabled !== false,

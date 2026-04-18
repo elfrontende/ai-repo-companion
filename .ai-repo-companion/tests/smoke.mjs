@@ -24,6 +24,7 @@ import { normalizeReviewOperations } from "../src/lib/review-normalization-engin
 import { rankReviewOperations } from "../src/lib/review-ranking-engine.mjs";
 import { applyIdempotencyGuard } from "../src/lib/review-idempotency-engine.mjs";
 import {
+  applyApprovalExpiryPolicy,
   assessReviewApprovalRequirement,
   createApprovalRequest
 } from "../src/lib/review-approval-engine.mjs";
@@ -336,6 +337,129 @@ await fs.access(createdApproval.approvalPath).then(
   () => Promise.reject(new Error("Approval file should be removed after apply.")),
   () => Promise.resolve()
 );
+
+const approvalExpiryRequeueRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-approval-expiry-requeue-"));
+await fs.cp(path.resolve("config"), path.join(approvalExpiryRequeueRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(approvalExpiryRequeueRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(approvalExpiryRequeueRoot, "state"), { recursive: true });
+await ensureWorkspace(approvalExpiryRequeueRoot);
+
+const approvalExpiryHistoryPath = path.join(approvalExpiryRequeueRoot, "state/reviews/history.jsonl");
+const expiredPendingAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+const requeueApprovalJob = {
+  id: "memjob-approval-expiry-requeue-1",
+  createdAt: expiredPendingAt,
+  finishedAt: expiredPendingAt,
+  status: "awaiting-approval",
+  mode: "expensive",
+  domains: ["security"],
+  reportPath: path.join(approvalExpiryRequeueRoot, "state/reviews/reports/memjob-approval-expiry-requeue-1.json"),
+  approval: {
+    status: "pending",
+    pendingAt: expiredPendingAt,
+    approvalPath: path.join(approvalExpiryRequeueRoot, "state/reviews/approvals/memjob-approval-expiry-requeue-1.json")
+  }
+};
+await writeJson(requeueApprovalJob.reportPath, {
+  job: requeueApprovalJob,
+  noteChanges: {
+    approval: {
+      status: "pending",
+      pendingAt: expiredPendingAt
+    },
+    applied: [],
+    skipped: [],
+    reason: "Synthetic pending approval for requeue."
+  }
+});
+await writeJson(requeueApprovalJob.approval.approvalPath, {
+  id: requeueApprovalJob.id,
+  createdAt: expiredPendingAt,
+  selectedOperations: []
+});
+const requeueQueue = [requeueApprovalJob];
+const requeueExpiry = await applyApprovalExpiryPolicy(
+  approvalExpiryRequeueRoot,
+  requeueQueue,
+  approvalExpiryHistoryPath,
+  {
+    enabled: true,
+    pendingApprovalTtlMinutes: 1,
+    onExpired: "requeue"
+  }
+);
+assert.equal(requeueExpiry.expired, 1);
+assert.equal(requeueExpiry.requeued, 1);
+assert.equal(requeueQueue[0].status, "queued");
+assert.equal(requeueQueue[0].approval.status, "expired");
+assert.equal(requeueQueue[0].approval.action, "requeue");
+const requeueExpiredReport = await readJson(requeueApprovalJob.reportPath, null);
+assert.equal(requeueExpiredReport.noteChanges.approval.status, "expired");
+assert.equal(requeueExpiredReport.noteChanges.approval.action, "requeue");
+await fs.access(requeueApprovalJob.approval.approvalPath).then(
+  () => Promise.reject(new Error("Expired requeue approval file should be removed.")),
+  () => Promise.resolve()
+);
+
+const approvalExpiryExpireRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-approval-expiry-expire-"));
+await fs.cp(path.resolve("config"), path.join(approvalExpiryExpireRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(approvalExpiryExpireRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(approvalExpiryExpireRoot, "state"), { recursive: true });
+await ensureWorkspace(approvalExpiryExpireRoot);
+
+const approvalExpireHistoryPath = path.join(approvalExpiryExpireRoot, "state/reviews/history.jsonl");
+const expireApprovalJob = {
+  id: "memjob-approval-expiry-expire-1",
+  createdAt: expiredPendingAt,
+  finishedAt: expiredPendingAt,
+  status: "awaiting-approval",
+  mode: "expensive",
+  domains: ["security"],
+  reportPath: path.join(approvalExpiryExpireRoot, "state/reviews/reports/memjob-approval-expiry-expire-1.json"),
+  approval: {
+    status: "pending",
+    pendingAt: expiredPendingAt,
+    approvalPath: path.join(approvalExpiryExpireRoot, "state/reviews/approvals/memjob-approval-expiry-expire-1.json")
+  }
+};
+await writeJson(expireApprovalJob.reportPath, {
+  job: expireApprovalJob,
+  noteChanges: {
+    approval: {
+      status: "pending",
+      pendingAt: expiredPendingAt
+    },
+    applied: [],
+    skipped: [],
+    reason: "Synthetic pending approval for expire."
+  }
+});
+await writeJson(expireApprovalJob.approval.approvalPath, {
+  id: expireApprovalJob.id,
+  createdAt: expiredPendingAt,
+  selectedOperations: []
+});
+const expireQueue = [expireApprovalJob];
+const expireExpiry = await applyApprovalExpiryPolicy(
+  approvalExpiryExpireRoot,
+  expireQueue,
+  approvalExpireHistoryPath,
+  {
+    enabled: true,
+    pendingApprovalTtlMinutes: 1,
+    onExpired: "expire"
+  }
+);
+assert.equal(expireExpiry.expired, 1);
+assert.equal(expireExpiry.completed, 1);
+assert.equal(expireQueue[0].status, "completed");
+assert.equal(expireQueue[0].approval.status, "expired");
+assert.equal(expireQueue[0].approval.action, "expire");
+const expireExpiredReport = await readJson(expireApprovalJob.reportPath, null);
+assert.equal(expireExpiredReport.noteChanges.approval.status, "expired");
+assert.equal(expireExpiredReport.noteChanges.approval.action, "expire");
+const approvalExpiryHistoryRaw = await fs.readFile(approvalExpireHistoryPath, "utf8");
+assert.match(approvalExpiryHistoryRaw, /"adapter":"approval-expiry-policy"/);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");
