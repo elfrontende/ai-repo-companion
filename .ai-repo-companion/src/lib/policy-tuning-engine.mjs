@@ -59,12 +59,14 @@ export async function applyPolicyTuning(rootDir) {
 }
 
 export async function runAutoPolicyTuning(rootDir) {
+  const reconciliation = await reconcileAutoPolicyTuning(rootDir, { silentNoop: true });
   const analysis = await analyzePolicyTuning(rootDir);
   const config = await readJson(analysis.configPath, {});
   const tuningConfig = config.tuning ?? {};
   const statePath = path.join(rootDir, "state/tuning/auto-tune-state.json");
   const lastTuningPath = path.join(rootDir, "state/tuning/last-tuning.json");
   const historyPath = path.join(rootDir, "state/tuning/history.jsonl");
+  const previousLastTuning = await readJson(lastTuningPath, null);
   const state = await readJson(statePath, {
     schemaVersion: 1,
     lastAppliedById: {}
@@ -79,7 +81,8 @@ export async function runAutoPolicyTuning(rootDir) {
       enabled: false,
       skippedReason: "auto-apply-disabled",
       applied: [],
-      blocked: []
+      blocked: [],
+      reconciliation
     };
   }
 
@@ -129,10 +132,21 @@ export async function runAutoPolicyTuning(rootDir) {
     enabled: true,
     cooldownMinutes,
     applied,
-    blocked
+    blocked,
+    reconciliation
   };
 
   await writeJson(statePath, state);
+  const nextCanary = applied.length > 0
+    ? {
+      status: "pending",
+      baselineBenchmark: summarizeBenchmarkForCanary(analysis.benchmark),
+      rollbackPlan: applied,
+      reconciledAt: null,
+      reconciliation: null
+    }
+    : preserveExistingCanary(previousLastTuning?.canary);
+
   await writeJson(lastTuningPath, {
     generatedAt: now,
     mode: "auto",
@@ -141,6 +155,7 @@ export async function runAutoPolicyTuning(rootDir) {
       applyableCount: analysis.summary.applyableCount,
       autoApplicableCount: candidates.filter((item) => item.canAutoApply).length
     },
+    canary: nextCanary,
     applied,
     blocked
   });
@@ -153,6 +168,129 @@ export async function runAutoPolicyTuning(rootDir) {
   await trimHistoryFile(historyPath, Number(tuningConfig.historyRetentionEntries) || 100);
 
   return result;
+}
+
+export async function reconcileAutoPolicyTuning(rootDir, options = {}) {
+  const configPath = path.join(rootDir, "config/system.json");
+  const lastTuningPath = path.join(rootDir, "state/tuning/last-tuning.json");
+  const historyPath = path.join(rootDir, "state/tuning/history.jsonl");
+  const statePath = path.join(rootDir, "state/tuning/auto-tune-state.json");
+  const config = await readJson(configPath, {});
+  const tuningConfig = config.tuning ?? {};
+  const lastTuning = await readJson(lastTuningPath, null);
+  const benchmark = await readJson(path.join(rootDir, "state/benchmarks/last-benchmark.json"), null);
+  const state = await readJson(statePath, {
+    schemaVersion: 1,
+    lastAppliedById: {}
+  });
+  const now = new Date().toISOString();
+
+  if (tuningConfig.autoRollbackEnabled === false) {
+    return {
+      mode: "reconcile",
+      enabled: false,
+      skippedReason: "auto-rollback-disabled",
+      rolledBack: [],
+      accepted: false
+    };
+  }
+
+  const canary = lastTuning?.canary ?? null;
+  if (!lastTuning || lastTuning.mode !== "auto" || !canary || canary.status !== "pending") {
+    return {
+      mode: "reconcile",
+      enabled: true,
+      skippedReason: options.silentNoop ? "no-pending-canary" : "no-pending-canary",
+      rolledBack: [],
+      accepted: false
+    };
+  }
+
+  const benchmarkGeneratedAt = benchmark?.generatedAt ?? null;
+  if (!benchmarkGeneratedAt || Date.parse(benchmarkGeneratedAt) <= Date.parse(lastTuning.generatedAt ?? "")) {
+    return {
+      mode: "reconcile",
+      enabled: true,
+      skippedReason: "waiting-for-new-benchmark",
+      rolledBack: [],
+      accepted: false
+    };
+  }
+
+  const evaluation = evaluateCanaryRegression(
+    canary.baselineBenchmark,
+    summarizeBenchmarkForCanary(benchmark),
+    tuningConfig
+  );
+
+  if (!evaluation.shouldRollback) {
+    lastTuning.canary = {
+      ...canary,
+      status: "accepted",
+      reconciledAt: now,
+      reconciliation: {
+        benchmarkGeneratedAt,
+        reasons: evaluation.reasons
+      }
+    };
+    await writeJson(lastTuningPath, lastTuning);
+    await appendLine(historyPath, JSON.stringify({
+      generatedAt: now,
+      mode: "auto-reconcile",
+      accepted: true,
+      reasons: evaluation.reasons
+    }));
+    await trimHistoryFile(historyPath, Number(tuningConfig.historyRetentionEntries) || 100);
+    return {
+      mode: "reconcile",
+      enabled: true,
+      accepted: true,
+      rolledBack: [],
+      reasons: evaluation.reasons
+    };
+  }
+
+  const rollbackPlan = Array.isArray(canary.rollbackPlan) ? [...canary.rollbackPlan].reverse() : [];
+  const rolledBack = [];
+  for (const change of rollbackPlan) {
+    applyConfigPatch(config, change.path, change.previousValue);
+    rolledBack.push({
+      id: change.id,
+      path: change.path,
+      restoredValue: change.previousValue
+    });
+    if (state.lastAppliedById) {
+      delete state.lastAppliedById[change.id];
+    }
+  }
+
+  await writeJson(configPath, config);
+  await writeJson(statePath, state);
+  lastTuning.canary = {
+    ...canary,
+    status: "rolled-back",
+    reconciledAt: now,
+    reconciliation: {
+      benchmarkGeneratedAt,
+      reasons: evaluation.reasons
+    }
+  };
+  await writeJson(lastTuningPath, lastTuning);
+  await appendLine(historyPath, JSON.stringify({
+    generatedAt: now,
+    mode: "auto-rollback",
+    rolledBack,
+    reasons: evaluation.reasons
+  }));
+  await trimHistoryFile(historyPath, Number(tuningConfig.historyRetentionEntries) || 100);
+
+  return {
+    mode: "reconcile",
+    enabled: true,
+    accepted: false,
+    rolledBack,
+    reasons: evaluation.reasons
+  };
 }
 
 function buildPolicySuggestions(config, metrics, benchmark) {
@@ -269,6 +407,55 @@ function buildPolicySuggestions(config, metrics, benchmark) {
   });
 
   return suggestions;
+}
+
+function summarizeBenchmarkForCanary(benchmark) {
+  return {
+    generatedAt: benchmark?.generatedAt ?? null,
+    cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
+    balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
+    saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null
+  };
+}
+
+function preserveExistingCanary(canary) {
+  if (canary?.status === "pending") {
+    return canary;
+  }
+  return {
+    status: "idle",
+    baselineBenchmark: null,
+    rollbackPlan: [],
+    reconciledAt: canary?.reconciledAt ?? null,
+    reconciliation: canary?.reconciliation ?? null
+  };
+}
+
+function evaluateCanaryRegression(previousBenchmark, nextBenchmark, tuningConfig = {}) {
+  const reasons = [];
+  const rollbackThreshold = Number(tuningConfig.rollbackRegressionThresholdPercent) || 3;
+  const rollbackOnCheapestVariantShift = tuningConfig.rollbackOnCheapestVariantShift !== false;
+  const previousBalancedReduction = Number(previousBenchmark?.balancedReductionPercent);
+  const nextBalancedReduction = Number(nextBenchmark?.balancedReductionPercent);
+
+  if (rollbackOnCheapestVariantShift
+    && previousBenchmark?.cheapestVariant
+    && nextBenchmark?.cheapestVariant
+    && previousBenchmark.cheapestVariant !== nextBenchmark.cheapestVariant) {
+    reasons.push(`cheapest variant changed from ${previousBenchmark.cheapestVariant} to ${nextBenchmark.cheapestVariant}`);
+  }
+
+  if (Number.isFinite(previousBalancedReduction) && Number.isFinite(nextBalancedReduction)) {
+    const delta = nextBalancedReduction - previousBalancedReduction;
+    if (delta <= -rollbackThreshold) {
+      reasons.push(`balanced reduction percent dropped by ${Math.abs(delta).toFixed(2)} points`);
+    }
+  }
+
+  return {
+    shouldRollback: reasons.length > 0,
+    reasons
+  };
 }
 
 function maybePushSuggestion(suggestions, suggestion) {

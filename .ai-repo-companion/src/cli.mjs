@@ -11,7 +11,7 @@ import { approvePendingReview, inspectReviewQueue, processReviewQueue } from "./
 import { getWorkerState, runReviewWorker } from "./lib/review-runner.mjs";
 import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
-import { analyzePolicyTuning, applyPolicyTuning, runAutoPolicyTuning } from "./lib/policy-tuning-engine.mjs";
+import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "./lib/policy-tuning-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.mjs";
 import { runSyntheticBenchmark } from "./lib/benchmark-engine.mjs";
 import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
@@ -199,9 +199,11 @@ async function runTune(args) {
     mode: "tune",
     tuning: args.auto
       ? await runAutoPolicyTuning(rootDir)
+      : (args.reconcile
+        ? await reconcileAutoPolicyTuning(rootDir)
       : (args.apply
         ? await applyPolicyTuning(rootDir)
-        : await analyzePolicyTuning(rootDir))
+        : await analyzePolicyTuning(rootDir)))
   };
 }
 
@@ -346,6 +348,7 @@ function helpText() {
       "node src/cli.mjs tune",
       "node src/cli.mjs tune --apply",
       "node src/cli.mjs tune --auto",
+      "node src/cli.mjs tune --reconcile",
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",
       "node src/cli.mjs review --jobId memjob-123 --live --model gpt-5.4",

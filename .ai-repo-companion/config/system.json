@@ -294,12 +294,15 @@
   },
   "tuning": {
     "autoApplyEnabled": true,
+    "autoRollbackEnabled": true,
     "cooldownMinutes": 720,
     "benchmarkFreshnessMinutes": 1440,
     "autoTuneFreshnessMinutes": 720,
     "historyRetentionEntries": 100,
     "benchmarkHistoryRetentionEntries": 50,
     "benchmarkTrendWindow": 5,
+    "rollbackRegressionThresholdPercent": 3,
+    "rollbackOnCheapestVariantShift": true,
     "autoApplySuggestionIds": [
       "raise-domain-threshold",
       "tighten-ranking-floor",

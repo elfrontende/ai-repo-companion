@@ -116,6 +116,22 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  if (tuningSummary.canaryStatus === "pending" && benchmarkSummary.loaded) {
+    findings.push({
+      severity: "info",
+      code: "canary-pending-reconcile",
+      message: "A recent auto-tune is still waiting for a newer benchmark pass. Run `benchmark` and then `tune --reconcile` or `tune --auto`."
+    });
+  }
+
+  if (tuningSummary.canaryStatus === "rolled-back") {
+    findings.push({
+      severity: "warning",
+      code: "auto-tune-rolled-back",
+      message: "The last auto-tune was rolled back by the canary check. Review benchmark drift before enabling more aggressive self-tuning."
+    });
+  }
+
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     queue,
@@ -192,7 +208,9 @@ async function readTuningSummary(rootDir, config = {}) {
     isStale: ageMinutes > freshnessMinutes,
     mode: tuning?.mode ?? null,
     appliedCount: Array.isArray(tuning?.applied) ? tuning.applied.length : 0,
-    blockedCount: Array.isArray(tuning?.blocked) ? tuning.blocked.length : 0
+    blockedCount: Array.isArray(tuning?.blocked) ? tuning.blocked.length : 0,
+    canaryStatus: tuning?.canary?.status ?? null,
+    canaryReconciledAt: tuning?.canary?.reconciledAt ?? null
   };
 }
 
