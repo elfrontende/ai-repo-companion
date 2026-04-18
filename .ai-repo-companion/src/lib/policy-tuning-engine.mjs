@@ -59,6 +59,9 @@ function buildPolicySuggestions(config, metrics) {
   const appliedOps = counters.appliedOperations ?? 0;
   const rejectedOps = counters.rejectedOperations ?? 0;
   const deferredOps = counters.deferredOperations ?? 0;
+  const avgTokensPerSelectedOperation = (counters.selectedOperations ?? 0) > 0
+    ? (metrics.cost?.liveTokensUsed ?? 0) / counters.selectedOperations
+    : 0;
 
   maybePushSuggestion(suggestions, {
     id: "raise-domain-threshold",
@@ -103,6 +106,24 @@ function buildPolicySuggestions(config, metrics) {
     path: ["reviewExecution", "approval", "onExpired"],
     currentValue: config.reviewExecution?.approval?.onExpired ?? "requeue",
     proposedValue: "requeue"
+  });
+
+  maybePushSuggestion(suggestions, {
+    id: "tighten-value-gate",
+    condition: (counters.processedJobs ?? 0) >= 3 && avgTokensPerSelectedOperation >= 30000,
+    reason: "Live review is expensive relative to the amount of useful note work getting through, so more weak balanced jobs should be skipped before model execution.",
+    path: ["reviewExecution", "valueGate", "minScore"],
+    currentValue: config.reviewExecution?.valueGate?.minScore ?? 60,
+    proposedValue: Math.min(90, (config.reviewExecution?.valueGate?.minScore ?? 60) + 5)
+  });
+
+  maybePushSuggestion(suggestions, {
+    id: "relax-value-gate",
+    condition: (counters.skippedJobs ?? 0) >= 3 && avgTokensPerSelectedOperation > 0 && avgTokensPerSelectedOperation <= 8000,
+    reason: "Many jobs are being skipped while live review is already cheap enough, so the value gate can be relaxed slightly.",
+    path: ["reviewExecution", "valueGate", "minScore"],
+    currentValue: config.reviewExecution?.valueGate?.minScore ?? 60,
+    proposedValue: Math.max(30, (config.reviewExecution?.valueGate?.minScore ?? 60) - 5)
   });
 
   return suggestions;
