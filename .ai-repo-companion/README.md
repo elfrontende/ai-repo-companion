@@ -34,6 +34,7 @@ npm run context -- --task "design a migration-safe auth refactor" --budget 900
 npm run sync -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions"
 npm run queue
 npm run review -- --maxJobs 1
+npm run worker -- --maxJobs 1
 npm test
 ```
 
@@ -48,6 +49,7 @@ npm test
 - memory policy engine with `cheap`, `balanced`, and `expensive` review modes
 - queued review jobs for future LLM-backed memory cleanup instead of hidden always-on background costs
 - review worker that consumes queued jobs and stores execution reports
+- background review runner with `once` and `loop` modes
 - pluggable provider adapter layer with `dry-run` and `command` execution modes
 
 ## Memory modes
@@ -98,6 +100,8 @@ node src/cli.mjs review --maxJobs 2
 node src/cli.mjs review --jobId memjob-20260418120000000
 node src/cli.mjs review --jobId memjob-20260418120000000 --live
 node src/cli.mjs review --jobId memjob-20260418120000000 --live --model gpt-5.4
+node src/cli.mjs worker --maxJobs 1
+node src/cli.mjs worker --loop --intervalSeconds 30 --stopWhenEmpty
 ```
 
 By default, the worker uses the `dry-run` adapter. That means:
@@ -175,6 +179,23 @@ Each provider can later be wired to a local CLI command:
 ```
 
 When enabled, the worker will send the review payload JSON to that command via stdin. This keeps the core runtime provider-agnostic and lets each repository choose how to connect Claude, Codex, Gemini, or Cursor later.
+
+## Background runner
+
+The repository now includes a lightweight automatic runner in `src/lib/review-runner.mjs`.
+
+It supports two styles:
+
+- `once`: process a batch of queued review jobs and stop
+- `loop`: keep polling on an interval until manually stopped or until the queue is empty
+
+Worker state is stored in `state/reviews/worker-state.json`.
+
+This is intentionally simple:
+
+- no hidden daemon install
+- no OS-specific service manager logic
+- can be launched from shell, cron, launchd, or systemd later
 
 ## What is intentionally not implemented yet
 

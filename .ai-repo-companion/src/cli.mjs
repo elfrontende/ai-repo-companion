@@ -8,6 +8,7 @@ import { assembleContext, loadNotes } from "./lib/context-engine.mjs";
 import { syncMemory } from "./lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "./lib/policy-engine.mjs";
 import { inspectReviewQueue, processReviewQueue } from "./lib/review-worker.mjs";
+import { getWorkerState, runReviewWorker } from "./lib/review-runner.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +52,9 @@ switch (command) {
     break;
   case "review":
     output(await runReview(args));
+    break;
+  case "worker":
+    output(await runWorker(args));
     break;
   case "demo":
     await requireTask(args);
@@ -145,6 +149,26 @@ async function runReview(args) {
   };
 }
 
+async function runWorker(args) {
+  const reviewConfig = buildRuntimeReviewConfig(systemConfig, args);
+
+  return {
+    rootDir,
+    mode: "worker",
+    result: await runReviewWorker(rootDir, reviewConfig, {
+      maxJobs: args.maxJobs,
+      jobId: args.jobId,
+      loop: args.loop,
+      intervalSeconds: args.intervalSeconds,
+      maxIterations: args.maxIterations,
+      stopWhenEmpty: args.stopWhenEmpty,
+      reviewConfig
+    }),
+    workerState: await getWorkerState(rootDir),
+    queue: await inspectReviewQueue(rootDir)
+  };
+}
+
 async function runDemo(args) {
   const plan = await runPlan(args.task);
   const context = await runContext(args.task, Number(args.budget) || systemConfig.retrieval?.defaultTokenBudget || 1200);
@@ -208,6 +232,8 @@ function helpText() {
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",
       "node src/cli.mjs review --jobId memjob-123 --live --model gpt-5.4",
+      "node src/cli.mjs worker --maxJobs 1",
+      "node src/cli.mjs worker --loop --intervalSeconds 30 --stopWhenEmpty",
       "node src/cli.mjs demo --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\""
     ]
   };

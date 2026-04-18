@@ -12,6 +12,7 @@
     "sync": "node src/cli.mjs sync",
     "queue": "node src/cli.mjs queue",
     "review": "node src/cli.mjs review",
+    "worker": "node src/cli.mjs worker",
     "demo": "node src/cli.mjs demo",
     "test": "node tests/smoke.mjs"
   }

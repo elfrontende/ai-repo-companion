@@ -11,6 +11,7 @@ import { syncMemory } from "../src/lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "../src/lib/policy-engine.mjs";
 import { inspectReviewQueue, processReviewQueue } from "../src/lib/review-worker.mjs";
 import { applyReviewOperations } from "../src/lib/review-note-engine.mjs";
+import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -154,5 +155,27 @@ const deprecatedSource = notesAfterMerge.find((note) => note.id === createdRevie
 assert.equal(deprecatedSource.kind, "deprecated");
 assert.ok(deprecatedSource.tags.includes("deprecated"));
 assert.ok(deprecatedSource.links.includes("z-130-background-memory-sync"));
+
+const secondSync = await syncMemory(
+  tempRoot,
+  {
+    task: "design a follow-up auth migration review",
+    summary: "Queue another review job for the automatic runner.",
+    artifacts: ["runner"]
+  },
+  config
+);
+await applyMemoryPolicyOutcome(tempRoot, memoryPolicy, taskProfile, secondSync);
+
+const runnerResult = await runReviewWorker(tempRoot, config, {
+  maxJobs: 1
+});
+assert.equal(runnerResult.mode, "once");
+assert.equal(runnerResult.processedCount, 1);
+
+const workerState = await getWorkerState(tempRoot);
+assert.equal(workerState.status, "idle");
+assert.equal(workerState.lastRunMode, "once");
+assert.ok(workerState.runs >= 1);
 
 console.log("smoke test passed");
