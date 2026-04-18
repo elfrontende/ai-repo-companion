@@ -15,6 +15,7 @@ import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
 import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
 import { evaluateReviewOperations } from "../src/lib/review-quality-engine.mjs";
 import { normalizeReviewOperations } from "../src/lib/review-normalization-engine.mjs";
+import { rankReviewOperations } from "../src/lib/review-ranking-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -254,6 +255,66 @@ assert.equal(semanticGuardResult.passed, false);
 assert.equal(semanticGuardResult.accepted.length, 0);
 assert.equal(semanticGuardResult.rejected.length, 1);
 assert.match(semanticGuardResult.rejected[0].reason, /self-link/i);
+
+const rankingResult = await rankReviewOperations(tempRoot, [
+  {
+    type: "append_note_update",
+    noteId: "z-000-index",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "",
+    kind: "",
+    summary: "Link a new auth architecture note from the index so retrieval can find it quickly.",
+    signals: ["Index the architecture note for retrieval."],
+    tagsToAdd: ["auth"],
+    linksToAdd: ["z-110-atomic-notes"],
+    tags: [],
+    links: []
+  },
+  {
+    type: "create_note",
+    noteId: "",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "Versioned auth contracts for review workers",
+    kind: "architecture",
+    summary: "Review workers should validate versioned auth contracts so migrations do not couple authorization to provider-specific identity payloads.",
+    signals: [
+      "Use versioned contracts for review workers",
+      "Keep migrations independent from provider payloads"
+    ],
+    tagsToAdd: [],
+    linksToAdd: [],
+    tags: ["auth", "migration", "review-worker"],
+    links: ["z-000-index", "z-110-atomic-notes"]
+  },
+  {
+    type: "append_note_update",
+    noteId: "z-130-background-memory-sync",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "",
+    kind: "",
+    summary: "Background sync should preserve auth migration decisions as linked atomic notes instead of broad summaries.",
+    signals: [
+      "Promote auth migration decisions into atomic notes",
+      "Link protected-domain notes automatically"
+    ],
+    tagsToAdd: ["auth", "architecture"],
+    linksToAdd: ["z-000-index"],
+    tags: [],
+    links: []
+  }
+], {
+  ...config.reviewExecution.operationRanking,
+  minScore: 20
+});
+
+assert.equal(rankingResult.passed, true);
+assert.equal(rankingResult.selected.length, 2);
+assert.equal(rankingResult.deferred.length, 1);
+assert.equal(rankingResult.ranked[0].type, "create_note");
+assert.match(rankingResult.deferred[0].reason, /apply budget/i);
 
 const notesAfterMerge = await loadNotes(tempRoot);
 const mergeTarget = notesAfterMerge.find((note) => note.id === "z-130-background-memory-sync");

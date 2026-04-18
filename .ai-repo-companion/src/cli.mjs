@@ -301,6 +301,10 @@ function describeRuntimeReviewConfig(config) {
       model: config.reviewExecution?.nativeCodex?.model ?? "",
       maxAttempts: config.reviewExecution?.nativeCodex?.maxAttempts ?? 1,
       retryBackoffMs: config.reviewExecution?.nativeCodex?.retryBackoffMs ?? 0
+    },
+    operationRanking: {
+      maxAppliedOperations: config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2,
+      minScore: config.reviewExecution?.operationRanking?.minScore ?? 35
     }
   };
 }

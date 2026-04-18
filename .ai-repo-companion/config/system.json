@@ -108,6 +108,10 @@
       "retryBackoffMs": 1500,
       "extraArgs": []
     },
+    "operationRanking": {
+      "maxAppliedOperations": 2,
+      "minScore": 35
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,
