@@ -12,7 +12,7 @@ import { readJson } from "./store.mjs";
 export async function getRuntimeStatus(rootDir, config = {}) {
   const queue = await inspectReviewQueue(rootDir);
   const metrics = await summarizeReviewMetrics(rootDir);
-  const benchmarkSummary = await readBenchmarkSummary(rootDir, config);
+  const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
   const tuningSummary = await readTuningSummary(rootDir, config);
   return {
     queue,
@@ -30,7 +30,8 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
   const worker = await getWorkerState(rootDir);
   const recovery = await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null);
   const lock = await readJson(path.join(rootDir, "state/reviews/worker-lock.json"), null);
-  const benchmarkSummary = await readBenchmarkSummary(rootDir, config);
+  const metrics = await summarizeReviewMetrics(rootDir);
+  const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
   const tuningSummary = await readTuningSummary(rootDir, config);
   const findings = [];
 
@@ -132,10 +133,19 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  for (const item of benchmarkSummary.domainDiagnostics.filter((entry) => entry.shouldTightenValueGate)) {
+    findings.push({
+      severity: "info",
+      code: `domain-value-gate-drift-${item.domain}`,
+      message: `${item.domain} still favors saver by ${item.reductionGap.toFixed(2)} points, but its configured value-gate threshold is only ${item.configuredThreshold}. Consider ${item.suggestedThreshold} for this low-risk domain.`
+    });
+  }
+
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     queue,
     worker,
+    metrics,
     benchmarkSummary,
     tuningSummary,
     recovery,
@@ -180,11 +190,12 @@ function buildCostSummary(queue, metrics) {
   };
 }
 
-async function readBenchmarkSummary(rootDir, config = {}) {
+async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
   const benchmark = await readJson(path.join(rootDir, "state/benchmarks/last-benchmark.json"), null);
   const generatedAt = benchmark?.generatedAt ?? null;
   const freshnessMinutes = config.tuning?.benchmarkFreshnessMinutes ?? 1440;
   const ageMinutes = ageInMinutes(generatedAt);
+  const domainDiagnostics = buildDomainDiagnostics(benchmark, config, metrics);
   return {
     loaded: Boolean(benchmark?.aggregate),
     generatedAt,
@@ -192,7 +203,8 @@ async function readBenchmarkSummary(rootDir, config = {}) {
     isStale: ageMinutes > freshnessMinutes,
     cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
-    saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null
+    saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
+    domainDiagnostics
   };
 }
 
@@ -233,4 +245,47 @@ function buildCostRecommendation(summary) {
     return "Current live review cost looks healthy for the amount of useful note work getting through.";
   }
   return "No strong cost signal yet. Keep collecting local metrics before tightening policy again.";
+}
+
+function buildDomainDiagnostics(benchmark, config, metrics) {
+  const monitoredDomains = config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"];
+  const byDomain = benchmark?.aggregate?.byDomain ?? {};
+  const globalThreshold = Number(config.reviewExecution?.valueGate?.minScore) || 60;
+  const tokenMap = Object.fromEntries((metrics?.topTokenDomains ?? []).map((entry) => [entry.key, entry.count]));
+
+  return monitoredDomains
+    .filter((domain) => byDomain?.[domain])
+    .map((domain) => {
+      // Domain diagnostics intentionally focus on cheap, low-risk domains.
+      // They help the operator see whether docs/deploy/ui/testing should use a
+      // stricter local value gate without forcing the same threshold on security work.
+      const summary = byDomain[domain];
+      const saverReduction = Number(summary?.byVariant?.saver?.reductionPercent) || 0;
+      const balancedReduction = Number(summary?.byVariant?.balanced?.reductionPercent) || 0;
+      const reductionGap = Number((saverReduction - balancedReduction).toFixed(2));
+      const storedThreshold = config.reviewExecution?.valueGate?.minScoreByDomain?.[domain];
+      const configuredThreshold = Number(storedThreshold) || globalThreshold;
+      const suggestedThreshold = Math.min(90, globalThreshold + 5);
+      const shouldTightenValueGate = summary?.cheapestVariant === "saver"
+        && reductionGap >= 4
+        && configuredThreshold < suggestedThreshold;
+
+      return {
+        domain,
+        cheapestVariant: summary?.cheapestVariant ?? null,
+        saverReductionPercent: saverReduction,
+        balancedReductionPercent: balancedReduction,
+        reductionGap,
+        configuredThreshold,
+        suggestedThreshold,
+        liveTokensUsed: Number(tokenMap[domain]) || 0,
+        shouldTightenValueGate
+      };
+    })
+    .sort((left, right) => {
+      if (right.liveTokensUsed !== left.liveTokensUsed) {
+        return right.liveTokensUsed - left.liveTokensUsed;
+      }
+      return right.reductionGap - left.reductionGap;
+    });
 }
