@@ -37,6 +37,7 @@ import { analyzePolicyTuning, applyPolicyTuning } from "../src/lib/policy-tuning
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
 import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
+import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -1133,5 +1134,77 @@ assert.equal(taskFlowResult.review.status, "processed");
 assert.equal(taskFlowResult.review.result.processedCount, 1);
 assert.equal(taskFlowResult.review.result.processed[0].adapter, "dry-run");
 assert.equal(taskFlowResult.policyOutcome.queuedJob.id, taskFlowResult.review.queuedJobId);
+
+const cursorStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-cursor-stub-"));
+const cursorStubPath = path.join(cursorStubDir, "cursor-stub.mjs");
+await fs.writeFile(cursorStubPath, `#!/usr/bin/env node
+console.log("Cursor helper preface");
+console.log(JSON.stringify({
+  summary: "Cursor proposed one safe note update.",
+  operations: [
+    {
+      type: "append_note_update",
+      noteId: "z-130-background-memory-sync",
+      sourceNoteId: "",
+      targetNoteId: "",
+      title: "",
+      kind: "",
+      summary: "Cursor can run in read-only review mode and still propose safe memory updates.",
+      signals: ["Use Cursor ask mode for read-only memory review"],
+      tagsToAdd: ["cursor"],
+      linksToAdd: ["z-000-index"],
+      tags: [],
+      links: []
+    }
+  ]
+}, null, 2));
+`, "utf8");
+await fs.chmod(cursorStubPath, 0o755);
+
+const cursorExecution = await executeReviewPayload(tempRoot, {
+  job: {
+    id: "memjob-cursor-1",
+    mode: "balanced",
+    budget: 300,
+    task: "capture Cursor review learnings",
+    domains: ["docs", "memory"],
+    reasons: ["Synthetic Cursor provider test."]
+  },
+  contextBundle: {
+    selectedNotes: [
+      {
+        id: "z-130-background-memory-sync",
+        title: "Background Memory Sync",
+        tags: ["memory", "sync"],
+        snippet: "Background sync should update atomic notes instead of broad summaries."
+      }
+    ]
+  }
+}, {
+  reviewExecution: {
+    providerByMode: {
+      balanced: "cursor"
+    },
+    nativeCursor: {
+      enabled: true,
+      binary: cursorStubPath,
+      mode: "ask",
+      sandbox: "enabled",
+      trustWorkspace: true,
+      force: false,
+      maxAttempts: 1,
+      retryBackoffMs: 0,
+      extraArgs: []
+    }
+  }
+});
+
+assert.equal(cursorExecution.provider, "cursor");
+assert.equal(cursorExecution.adapter, "cursor-native");
+assert.equal(cursorExecution.status, "completed");
+assert.equal(cursorExecution.output.parsed.summary, "Cursor proposed one safe note update.");
+assert.equal(cursorExecution.output.parsed.operations[0].noteId, "z-130-background-memory-sync");
+assert.ok(cursorExecution.output.args.includes("--mode"));
+assert.ok(cursorExecution.output.args.includes("ask"));
 
 console.log("smoke test passed");

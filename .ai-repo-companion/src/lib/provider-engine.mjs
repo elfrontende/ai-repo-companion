@@ -11,10 +11,14 @@ export async function executeReviewPayload(rootDir, payload, config) {
   const executionConfig = config.reviewExecution ?? {};
   const provider = pickProvider(payload.job.mode, executionConfig);
   const nativeCodex = executionConfig.nativeCodex ?? {};
+  const nativeCursor = executionConfig.nativeCursor ?? {};
   const commandConfig = executionConfig.commandAdapters?.[provider];
 
   if (provider === "codex" && nativeCodex.enabled) {
     return executeNativeCodexAdapter(rootDir, payload, nativeCodex);
+  }
+  if (provider === "cursor" && nativeCursor.enabled) {
+    return executeNativeCursorAdapter(rootDir, payload, nativeCursor);
   }
 
   const adapter = commandConfig?.enabled ? "command" : executionConfig.defaultAdapter ?? "dry-run";
@@ -91,7 +95,7 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
   let lastResult = null;
 
   for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt += 1) {
-    const result = await runCommand("codex", args, prompt, rootDir);
+    const result = await runCommand(nativeCodex.binary ?? "codex", args, prompt, rootDir);
     lastResult = result;
     const attemptRecord = {
       attempt,
@@ -146,6 +150,114 @@ async function executeNativeCodexAdapter(rootDir, payload, nativeCodex) {
   return {
     provider: "codex",
     adapter: "codex-native",
+    status: "completed",
+    output: {
+      args,
+      attempts,
+      raw,
+      parsed
+    }
+  };
+}
+
+async function executeNativeCursorAdapter(rootDir, payload, nativeCursor) {
+  // Cursor does not currently expose a schema-constrained output flag like Codex.
+  // To keep the local apply path safe, we force a strict JSON-only contract
+  // in the prompt and then parse the returned text locally.
+  const prompt = buildCursorReviewPrompt(payload);
+  const args = [
+    "agent",
+    "--print",
+    "--output-format",
+    "text",
+    "--mode",
+    nativeCursor.mode ?? "ask",
+    "--workspace",
+    rootDir
+  ];
+
+  if (nativeCursor.trustWorkspace !== false) {
+    args.push("--trust");
+  }
+  if (nativeCursor.force === true) {
+    args.push("--force");
+  }
+  if (nativeCursor.sandbox) {
+    args.push("--sandbox", nativeCursor.sandbox);
+  }
+  if (nativeCursor.model) {
+    args.push("--model", nativeCursor.model);
+  }
+  if (Array.isArray(nativeCursor.extraArgs) && nativeCursor.extraArgs.length > 0) {
+    args.push(...nativeCursor.extraArgs);
+  }
+  args.push(prompt);
+
+  const retryConfig = {
+    maxAttempts: Math.max(1, Number(nativeCursor.maxAttempts) || 2),
+    retryBackoffMs: Math.max(0, Number(nativeCursor.retryBackoffMs) || 1500)
+  };
+  const attempts = [];
+  let raw = "";
+  let parsed = null;
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt += 1) {
+    const result = await runCommand(nativeCursor.binary ?? "cursor", args, "", rootDir);
+    lastResult = result;
+    const attemptRecord = {
+      attempt,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      exitCode: result.code
+    };
+
+    if (result.code === 0) {
+      try {
+        raw = extractJsonPayload(result.stdout);
+        parsed = JSON.parse(raw);
+        attempts.push({
+          ...attemptRecord,
+          status: "completed"
+        });
+        break;
+      } catch (error) {
+        attempts.push({
+          ...attemptRecord,
+          status: "failed",
+          parseError: error.message
+        });
+      }
+    } else {
+      attempts.push({
+        ...attemptRecord,
+        status: "failed"
+      });
+    }
+
+    if (attempt < retryConfig.maxAttempts) {
+      await sleep(retryConfig.retryBackoffMs * attempt);
+    }
+  }
+
+  if (!parsed) {
+    return {
+      provider: "cursor",
+      adapter: "cursor-native",
+      status: "failed",
+      output: {
+        args,
+        attempts,
+        stdout: lastResult?.stdout?.trim?.() ?? "",
+        stderr: lastResult?.stderr?.trim?.() ?? "",
+        exitCode: lastResult?.code ?? 1
+      }
+    };
+  }
+
+  return {
+    provider: "cursor",
+    adapter: "cursor-native",
     status: "completed",
     output: {
       args,
@@ -222,6 +334,39 @@ function buildReviewPrompt(payload) {
   ].join("\n");
 }
 
+function buildCursorReviewPrompt(payload) {
+  return [
+    buildReviewPrompt(payload).replace(
+      "Return only structured JSON that matches the provided schema.",
+      "Return exactly one raw JSON object and nothing else. Do not use markdown fences."
+    ),
+    "",
+    "JSON contract:",
+    "{",
+    '  "summary": "short sentence",',
+    '  "operations": [',
+    "    {",
+    '      "type": "append_note_update | merge_note_into_existing | create_note",',
+    '      "noteId": "",',
+    '      "sourceNoteId": "",',
+    '      "targetNoteId": "",',
+    '      "title": "",',
+    '      "kind": "",',
+    '      "summary": "",',
+    '      "signals": [],',
+    '      "tagsToAdd": [],',
+    '      "linksToAdd": [],',
+    '      "tags": [],',
+    '      "links": []',
+    "    }",
+    "  ]",
+    "}",
+    "Every operation object must include every key above.",
+    "For non-applicable text fields use an empty string.",
+    "For non-applicable list fields use []."
+  ].join("\n");
+}
+
 function interpolateArg(arg, payload, provider) {
   return arg
     .replaceAll("{provider}", provider)
@@ -257,6 +402,82 @@ function runCommand(command, args, stdinBody, cwd) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractJsonPayload(rawText) {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    throw new Error("Provider returned empty output.");
+  }
+
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    // Fall through to the looser extraction paths below.
+  }
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch) {
+    const candidate = fencedMatch[1].trim();
+    JSON.parse(candidate);
+    return candidate;
+  }
+
+  const balanced = extractBalancedJsonObject(trimmed);
+  if (!balanced) {
+    throw new Error("Provider output did not contain a parseable JSON object.");
+  }
+
+  JSON.parse(balanced);
+  return balanced;
+}
+
+function extractBalancedJsonObject(text) {
+  const startIndex = text.indexOf("{");
+  if (startIndex === -1) {
+    return "";
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return "";
 }
 
 function buildCodexOutputSchema() {

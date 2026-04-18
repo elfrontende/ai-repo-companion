@@ -34,6 +34,7 @@ npm run context -- --task "design a migration-safe auth refactor" --budget 900
 npm run sync -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions"
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow --live
+npm run task -- --task "capture auth rollout learnings" --summary "Collapse duplicate auth notes" --artifacts "notes,worker" --reviewNow --live --provider cursor
 npm run queue
 npm run status
 npm run doctor
@@ -130,6 +131,7 @@ node src/cli.mjs review --maxJobs 2
 node src/cli.mjs review --jobId memjob-20260418120000000
 node src/cli.mjs review --jobId memjob-20260418120000000 --live
 node src/cli.mjs review --jobId memjob-20260418120000000 --live --model gpt-5.4
+node src/cli.mjs review --jobId memjob-20260418120000000 --live --provider cursor
 node src/cli.mjs approve --jobId memjob-20260418120000000
 node src/cli.mjs worker --maxJobs 1
 node src/cli.mjs worker --loop --intervalSeconds 30 --stopWhenEmpty
@@ -265,6 +267,7 @@ These defaults live in `config/system.json`:
 ```json
 "nativeCodex": {
   "enabled": false,
+  "binary": "codex",
   "model": "",
   "sandbox": "workspace-write",
   "maxAttempts": 2,
@@ -272,6 +275,37 @@ These defaults live in `config/system.json`:
   "extraArgs": []
 }
 ```
+
+## Cursor support
+
+Cursor is now the second live provider path, but only Cursor was added beyond Codex.
+
+When `--live --provider cursor` is used, the worker will:
+
+1. route `balanced` and `expensive` review jobs to Cursor for that run only
+2. call `cursor agent` in headless `ask` mode
+3. require one raw JSON object in stdout
+4. parse that JSON locally and send it through the same normalization, quality, ranking, approval, and recovery path as Codex
+
+Useful examples:
+
+```bash
+node src/cli.mjs review --jobId memjob-20260418120000000 --live --provider cursor
+node src/cli.mjs task --task "capture auth rollout learnings" \
+  --summary "Collapse duplicate auth notes" \
+  --artifacts "notes,worker" \
+  --reviewNow \
+  --live \
+  --provider cursor
+```
+
+Important Cursor detail:
+
+- Cursor does not currently use the same schema-constrained output flag as Codex in this runtime
+- instead, the prompt forces a strict JSON-only contract and the local runtime extracts and parses the JSON text
+- if `cursor agent` is not authenticated, the run fails cleanly and the queue/report shows that provider failure
+
+The runtime keeps future provider expansion open through `providerByMode`, `commandAdapters`, and native provider config blocks, but only Codex and Cursor are wired as native live paths right now.
 
 Quality gate rules are intentionally simple:
 
