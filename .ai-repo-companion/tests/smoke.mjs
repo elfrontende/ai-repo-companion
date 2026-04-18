@@ -711,6 +711,43 @@ await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"),
   aggregate: {
     taskCount: 5,
     cheapestVariant: "saver",
+    byDomain: {
+      docs: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 52.4 },
+          balanced: { reductionPercent: 45.1 }
+        }
+      },
+      deploy: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 49.8 },
+          balanced: { reductionPercent: 41.2 }
+        }
+      },
+      ui: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 46.9 },
+          balanced: { reductionPercent: 40.4 }
+        }
+      },
+      testing: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 44.5 },
+          balanced: { reductionPercent: 37.8 }
+        }
+      },
+      security: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 28.5 },
+          balanced: { reductionPercent: 32.6 }
+        }
+      }
+    },
     byVariant: {
       saver: {
         totalTokens: 4200,
@@ -754,6 +791,43 @@ await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"),
   aggregate: {
     taskCount: 5,
     cheapestVariant: "balanced",
+    byDomain: {
+      docs: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 34.1 },
+          balanced: { reductionPercent: 30.4 }
+        }
+      },
+      deploy: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 32.5 },
+          balanced: { reductionPercent: 28.1 }
+        }
+      },
+      ui: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 35.2 },
+          balanced: { reductionPercent: 31.6 }
+        }
+      },
+      testing: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 33.7 },
+          balanced: { reductionPercent: 29.3 }
+        }
+      },
+      security: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 26.4 },
+          balanced: { reductionPercent: 31.7 }
+        }
+      }
+    },
     byVariant: {
       saver: {
         totalTokens: 5200,
@@ -991,6 +1065,8 @@ assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.strict));
 const benchmarkReport = await readJson(path.join(benchmarkRoot, "state/benchmarks/last-benchmark.json"), null);
 assert.equal(benchmarkReport.aggregate.taskCount, 5);
 assert.ok(benchmarkReport.aggregate.byVariant.balanced.totalTokens > 0);
+assert.equal(benchmarkReport.aggregate.byDomain.docs.cheapestVariant, "saver");
+assert.ok(benchmarkReport.aggregate.byDomain.deploy.byVariant.saver.totalTokens > 0);
 assert.equal(benchmarkReport.trend.historyEntries, 3);
 assert.equal(benchmarkReport.trend.cheapestVariantStreak.variant, "saver");
 assert.equal(benchmarkReport.trend.cheapestVariantStreak.count, 3);

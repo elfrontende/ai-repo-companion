@@ -410,11 +410,26 @@ function buildPolicySuggestions(config, metrics, benchmark) {
 }
 
 function summarizeBenchmarkForCanary(benchmark) {
+  // Canary reconciliation should not look only at one global number.
+  // We also keep a small per-domain summary so cheap domains like docs/deploy
+  // can trigger a rollback even when auth/security keeps the global average flat.
+  const monitoredDomains = Object.fromEntries(
+    Object.entries(benchmark?.aggregate?.byDomain ?? {}).map(([domain, summary]) => [
+      domain,
+      {
+        cheapestVariant: summary?.cheapestVariant ?? null,
+        balancedReductionPercent: summary?.byVariant?.balanced?.reductionPercent ?? null,
+        saverReductionPercent: summary?.byVariant?.saver?.reductionPercent ?? null
+      }
+    ])
+  );
+
   return {
     generatedAt: benchmark?.generatedAt ?? null,
     cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
-    saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null
+    saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
+    byDomain: monitoredDomains
   };
 }
 
@@ -435,20 +450,32 @@ function evaluateCanaryRegression(previousBenchmark, nextBenchmark, tuningConfig
   const reasons = [];
   const rollbackThreshold = Number(tuningConfig.rollbackRegressionThresholdPercent) || 3;
   const rollbackOnCheapestVariantShift = tuningConfig.rollbackOnCheapestVariantShift !== false;
-  const previousBalancedReduction = Number(previousBenchmark?.balancedReductionPercent);
-  const nextBalancedReduction = Number(nextBenchmark?.balancedReductionPercent);
+  const monitoredDomains = tuningConfig.canaryDomains ?? ["docs", "deploy", "ui", "testing"];
+  const domainReasons = buildDomainCanaryReasons(
+    previousBenchmark?.byDomain ?? {},
+    nextBenchmark?.byDomain ?? {},
+    monitoredDomains,
+    rollbackThreshold,
+    rollbackOnCheapestVariantShift
+  );
+  reasons.push(...domainReasons);
 
-  if (rollbackOnCheapestVariantShift
-    && previousBenchmark?.cheapestVariant
-    && nextBenchmark?.cheapestVariant
-    && previousBenchmark.cheapestVariant !== nextBenchmark.cheapestVariant) {
-    reasons.push(`cheapest variant changed from ${previousBenchmark.cheapestVariant} to ${nextBenchmark.cheapestVariant}`);
-  }
+  if (reasons.length === 0) {
+    const previousBalancedReduction = Number(previousBenchmark?.balancedReductionPercent);
+    const nextBalancedReduction = Number(nextBenchmark?.balancedReductionPercent);
 
-  if (Number.isFinite(previousBalancedReduction) && Number.isFinite(nextBalancedReduction)) {
-    const delta = nextBalancedReduction - previousBalancedReduction;
-    if (delta <= -rollbackThreshold) {
-      reasons.push(`balanced reduction percent dropped by ${Math.abs(delta).toFixed(2)} points`);
+    if (rollbackOnCheapestVariantShift
+      && previousBenchmark?.cheapestVariant
+      && nextBenchmark?.cheapestVariant
+      && previousBenchmark.cheapestVariant !== nextBenchmark.cheapestVariant) {
+      reasons.push(`cheapest variant changed from ${previousBenchmark.cheapestVariant} to ${nextBenchmark.cheapestVariant}`);
+    }
+
+    if (Number.isFinite(previousBalancedReduction) && Number.isFinite(nextBalancedReduction)) {
+      const delta = nextBalancedReduction - previousBalancedReduction;
+      if (delta <= -rollbackThreshold) {
+        reasons.push(`balanced reduction percent dropped by ${Math.abs(delta).toFixed(2)} points`);
+      }
     }
   }
 
@@ -456,6 +483,39 @@ function evaluateCanaryRegression(previousBenchmark, nextBenchmark, tuningConfig
     shouldRollback: reasons.length > 0,
     reasons
   };
+}
+
+function buildDomainCanaryReasons(previousDomains, nextDomains, monitoredDomains, rollbackThreshold, rollbackOnCheapestVariantShift) {
+  const reasons = [];
+
+  for (const domain of monitoredDomains) {
+    const previous = previousDomains?.[domain];
+    const next = nextDomains?.[domain];
+    if (!previous || !next) {
+      continue;
+    }
+
+    if (rollbackOnCheapestVariantShift
+      && previous.cheapestVariant
+      && next.cheapestVariant
+      && previous.cheapestVariant !== next.cheapestVariant) {
+      reasons.push(`${domain} cheapest variant changed from ${previous.cheapestVariant} to ${next.cheapestVariant}`);
+      continue;
+    }
+
+    const previousBalancedReduction = Number(previous.balancedReductionPercent);
+    const nextBalancedReduction = Number(next.balancedReductionPercent);
+    if (!Number.isFinite(previousBalancedReduction) || !Number.isFinite(nextBalancedReduction)) {
+      continue;
+    }
+
+    const delta = nextBalancedReduction - previousBalancedReduction;
+    if (delta <= -rollbackThreshold) {
+      reasons.push(`${domain} balanced reduction percent dropped by ${Math.abs(delta).toFixed(2)} points`);
+    }
+  }
+
+  return reasons;
 }
 
 function maybePushSuggestion(suggestions, suggestion) {

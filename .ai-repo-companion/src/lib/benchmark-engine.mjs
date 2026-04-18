@@ -11,27 +11,32 @@ const defaultBenchmarkTasks = [
   {
     id: "docs-small",
     task: "fix a typo and tighten wording in the deployment README",
-    difficulty: "small"
+    difficulty: "small",
+    domain: "docs"
   },
   {
     id: "ui-medium",
     task: "add validation rules and error states for a login form component",
-    difficulty: "medium"
+    difficulty: "medium",
+    domain: "ui"
   },
   {
     id: "auth-hard",
     task: "design a security-focused migration plan for auth middleware and permission checks",
-    difficulty: "hard"
+    difficulty: "hard",
+    domain: "security"
   },
   {
     id: "testing-medium",
     task: "investigate a flaky regression test around API retries and timeouts",
-    difficulty: "medium"
+    difficulty: "medium",
+    domain: "testing"
   },
   {
     id: "deploy-hard",
     task: "prepare a migration-safe CI/CD rollout and deployment fallback checklist",
-    difficulty: "hard"
+    difficulty: "hard",
+    domain: "deploy"
   }
 ];
 
@@ -57,6 +62,7 @@ export async function runSyntheticBenchmark(rootDir, config) {
 
     taskResults.push({
       id: sample.id,
+      domain: sample.domain,
       difficulty: sample.difficulty,
       task: sample.task,
       mode: variants.balanced.mode,
@@ -227,6 +233,7 @@ function aggregateBenchmarkResults(taskResults) {
       taskResults.reduce((total, item) => total + item.savings.reductionPercent, 0) / taskResults.length
     ).toFixed(2)),
     byVariant,
+    byDomain: aggregateBenchmarkByDomain(taskResults),
     cheapestVariant: Object.entries(byVariant)
       .sort((left, right) => left[1].totalTokens - right[1].totalTokens)[0]?.[0] ?? "balanced"
   };
@@ -350,6 +357,51 @@ function buildVariantDelta(previousByVariant = {}, latestByVariant = {}) {
         reductionPercentDelta: Number(latestByVariant?.[key]?.reductionPercent ?? 0) - Number(previousByVariant?.[key]?.reductionPercent ?? 0)
       }
     ])
+  );
+}
+
+function aggregateBenchmarkByDomain(taskResults) {
+  const grouped = new Map();
+  for (const task of taskResults) {
+    const domain = task.domain ?? "unknown";
+    const bucket = grouped.get(domain) ?? [];
+    bucket.push(task);
+    grouped.set(domain, bucket);
+  }
+
+  return Object.fromEntries(
+    [...grouped.entries()].map(([domain, tasks]) => {
+      // Per-domain totals give the tuner a more honest canary signal.
+      // Cheap domains can regress on their own, and a single global average
+      // would let heavy security/auth workloads hide that drift.
+      const baselineTotalTokens = tasks.reduce((total, item) => total + item.baseline.totalTokens, 0);
+      const byVariant = Object.fromEntries(
+        benchmarkVariants.map((variant) => {
+          const totalTokens = tasks.reduce((total, item) => total + item.variants[variant.id].totalTokens, 0);
+          return [
+            variant.id,
+            {
+              totalTokens,
+              tokensSaved: baselineTotalTokens - totalTokens,
+              reductionPercent: baselineTotalTokens > 0
+                ? Number((((baselineTotalTokens - totalTokens) / baselineTotalTokens) * 100).toFixed(2))
+                : 0
+            }
+          ];
+        })
+      );
+
+      return [
+        domain,
+        {
+          taskCount: tasks.length,
+          baselineTotalTokens,
+          byVariant,
+          cheapestVariant: Object.entries(byVariant)
+            .sort((left, right) => left[1].totalTokens - right[1].totalTokens)[0]?.[0] ?? "balanced"
+        }
+      ];
+    })
   );
 }
 

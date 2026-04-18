@@ -303,6 +303,12 @@
     "benchmarkTrendWindow": 5,
     "rollbackRegressionThresholdPercent": 3,
     "rollbackOnCheapestVariantShift": true,
+    "canaryDomains": [
+      "docs",
+      "deploy",
+      "ui",
+      "testing"
+    ],
     "autoApplySuggestionIds": [
       "raise-domain-threshold",
       "tighten-ranking-floor",
