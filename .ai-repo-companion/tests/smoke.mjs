@@ -33,7 +33,7 @@ import {
   recoverInterruptedReviewRun
 } from "../src/lib/review-recovery-engine.mjs";
 import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
-import { analyzePolicyTuning, applyPolicyTuning, runAutoPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
+import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
 import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
@@ -748,6 +748,43 @@ assert.match(autoTuneHistory, /benchmark-lower-balanced-effort/);
 const autoTuningSecond = await runAutoPolicyTuning(autoTuneRoot);
 assert.equal(autoTuningSecond.applied.length, 0);
 assert.ok(autoTuningSecond.blocked.some((item) => item.id === "tighten-value-gate"));
+
+await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"), {
+  generatedAt: new Date(Date.now() + 60 * 1000).toISOString(),
+  aggregate: {
+    taskCount: 5,
+    cheapestVariant: "balanced",
+    byVariant: {
+      saver: {
+        totalTokens: 5200,
+        tokensSaved: 2800,
+        reductionPercent: 35.5
+      },
+      balanced: {
+        totalTokens: 5600,
+        tokensSaved: 2400,
+        reductionPercent: 30.75
+      },
+      strict: {
+        totalTokens: 6400,
+        tokensSaved: 1600,
+        reductionPercent: 20
+      }
+    }
+  }
+});
+
+const reconcileResult = await reconcileAutoPolicyTuning(autoTuneRoot);
+assert.equal(reconcileResult.accepted, false);
+assert.ok(reconcileResult.rolledBack.some((item) => item.id === "tighten-value-gate"));
+assert.ok(reconcileResult.reasons.some((reason) => /cheapest variant changed/i.test(reason)));
+const rolledBackConfig = await readJson(path.join(autoTuneRoot, "config/system.json"), {});
+assert.equal(rolledBackConfig.reviewExecution.valueGate.minScore, 60);
+assert.equal(rolledBackConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "medium");
+const rolledBackTuning = await readJson(path.join(autoTuneRoot, "state/tuning/last-tuning.json"), {});
+assert.equal(rolledBackTuning.canary.status, "rolled-back");
+const rolledBackState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-tune-state.json"), {});
+assert.equal(rolledBackState.lastAppliedById["tighten-value-gate"], undefined);
 
 const lockRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-lock-"));
 await fs.cp(path.resolve("config"), path.join(lockRoot, "config"), { recursive: true });
