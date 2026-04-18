@@ -37,6 +37,7 @@ npm run task -- --task "design a migration-safe auth refactor" --summary "Split 
 npm run queue
 npm run status
 npm run doctor
+npm run benchmark
 npm run metrics
 npm run tune
 npm run tune -- --apply
@@ -177,6 +178,14 @@ Daily ergonomics are better now too:
 - `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
 
 This is the operator-facing layer: fewer manual file inspections, more direct answers about whether the runtime looks healthy.
+
+Synthetic validation is built in too:
+
+- `node src/cli.mjs benchmark` runs a small local suite of tasks with mixed difficulty
+- each sample compares `withSystem` against a naive `baseline` that always drags the full note set
+- reports are written to `state/benchmarks/last-benchmark.json`
+
+This gives a repeatable local proxy for token savings before you trust the system on real repository work.
 
 Policy tuning is now metrics-aware:
 
