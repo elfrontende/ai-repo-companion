@@ -206,76 +206,45 @@ function buildCodexOutputSchema() {
         type: "array",
         maxItems: 3,
         items: {
-          oneOf: [
-            {
-              type: "object",
-              additionalProperties: false,
-              required: ["type", "noteId", "summary"],
-              properties: {
-                type: { const: "append_note_update" },
-                noteId: { type: "string" },
-                summary: { type: "string" },
-                signals: {
-                  type: "array",
-                  items: { type: "string" }
-                },
-                tagsToAdd: {
-                  type: "array",
-                  items: { type: "string" }
-                },
-                linksToAdd: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
+          type: "object",
+          additionalProperties: false,
+          required: ["type", "summary"],
+          properties: {
+            type: {
+              type: "string",
+              enum: [
+                "append_note_update",
+                "merge_note_into_existing",
+                "create_note"
+              ]
             },
-            {
-              type: "object",
-              additionalProperties: false,
-              required: ["type", "sourceNoteId", "targetNoteId", "summary"],
-              properties: {
-                type: { const: "merge_note_into_existing" },
-                sourceNoteId: { type: "string" },
-                targetNoteId: { type: "string" },
-                summary: { type: "string" },
-                signals: {
-                  type: "array",
-                  items: { type: "string" }
-                },
-                tagsToAdd: {
-                  type: "array",
-                  items: { type: "string" }
-                },
-                linksToAdd: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
+            noteId: { type: "string" },
+            sourceNoteId: { type: "string" },
+            targetNoteId: { type: "string" },
+            title: { type: "string" },
+            kind: { type: "string" },
+            summary: { type: "string" },
+            signals: {
+              type: "array",
+              items: { type: "string" }
             },
-            {
-              type: "object",
-              additionalProperties: false,
-              required: ["type", "title", "summary"],
-              properties: {
-                type: { const: "create_note" },
-                title: { type: "string" },
-                kind: { type: "string" },
-                summary: { type: "string" },
-                signals: {
-                  type: "array",
-                  items: { type: "string" }
-                },
-                tags: {
-                  type: "array",
-                  items: { type: "string" }
-                },
-                links: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
+            tagsToAdd: {
+              type: "array",
+              items: { type: "string" }
+            },
+            linksToAdd: {
+              type: "array",
+              items: { type: "string" }
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" }
+            },
+            links: {
+              type: "array",
+              items: { type: "string" }
             }
-          ]
+          }
         }
       }
     }
