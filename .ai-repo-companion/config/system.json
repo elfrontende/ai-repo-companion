@@ -145,6 +145,10 @@
       "strategy": "rollback-and-requeue",
       "keepBackups": false
     },
+    "runtimeLock": {
+      "enabled": true,
+      "maxAgeMinutes": 15
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,

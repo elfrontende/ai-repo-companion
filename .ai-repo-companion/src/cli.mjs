@@ -386,6 +386,10 @@ function describeRuntimeReviewConfig(config) {
       enabled: config.reviewExecution?.recovery?.enabled !== false,
       strategy: config.reviewExecution?.recovery?.strategy ?? "rollback-and-requeue",
       keepBackups: config.reviewExecution?.recovery?.keepBackups === true
+    },
+    runtimeLock: {
+      enabled: config.reviewExecution?.runtimeLock?.enabled !== false,
+      maxAgeMinutes: config.reviewExecution?.runtimeLock?.maxAgeMinutes ?? 15
     }
   };
 }

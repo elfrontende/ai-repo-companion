@@ -34,6 +34,7 @@ import {
 } from "../src/lib/review-recovery-engine.mjs";
 import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
+import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -539,6 +540,54 @@ assert.equal(tunedConfig.reviewExecution.operationRanking.minScore, 40);
 assert.equal(tunedConfig.reviewExecution.operationRanking.maxAppliedOperations, 3);
 assert.equal(tunedConfig.reviewExecution.approval.pendingApprovalTtlMinutes, 300);
 assert.equal(tunedConfig.reviewExecution.approval.onExpired, "requeue");
+
+const lockRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-lock-"));
+await fs.cp(path.resolve("config"), path.join(lockRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(lockRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(lockRoot, "state"), { recursive: true });
+await ensureWorkspace(lockRoot);
+
+const lockConfig = await readJson(path.join(lockRoot, "config/system.json"), {});
+const heldLock = await acquireReviewLock(lockRoot, lockConfig.reviewExecution?.runtimeLock ?? {});
+assert.equal(heldLock.acquired, true);
+
+const blockedRun = await processReviewQueue(lockRoot, lockConfig, { maxJobs: 1 });
+assert.equal(blockedRun.processedCount, 0);
+assert.equal(blockedRun.lock.acquired, false);
+assert.match(blockedRun.lock.reason, /runtime lock/i);
+
+const releaseLockResult = await releaseReviewLock(lockRoot, heldLock);
+assert.equal(releaseLockResult.released, true);
+
+const staleLockRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-stale-lock-"));
+await fs.cp(path.resolve("config"), path.join(staleLockRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(staleLockRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(staleLockRoot, "state"), { recursive: true });
+await ensureWorkspace(staleLockRoot);
+
+const staleLockConfig = await readJson(path.join(staleLockRoot, "config/system.json"), {});
+await writeJson(path.join(staleLockRoot, "state/reviews/worker-lock.json"), {
+  ownerId: "stale-lock-owner",
+  startedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+});
+await writeJson(path.join(staleLockRoot, "state/memory/review-queue.json"), [
+  {
+    id: "memjob-stale-lock-1",
+    createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    mode: "balanced",
+    budget: 300,
+    task: "recover after a stale runtime lock",
+    domains: ["docs"],
+    reasons: ["Synthetic stale lock test."],
+    status: "queued"
+  }
+]);
+
+const staleLockRun = await processReviewQueue(staleLockRoot, staleLockConfig, { maxJobs: 1 });
+assert.equal(staleLockRun.lock.acquired, true);
+assert.equal(staleLockRun.processedCount, 1);
+const staleLockFile = await readJson(path.join(staleLockRoot, "state/reviews/worker-lock.json"), {});
+assert.deepEqual(staleLockFile, {});
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");
