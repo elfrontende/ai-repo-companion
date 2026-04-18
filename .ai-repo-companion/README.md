@@ -34,6 +34,8 @@ npm run context -- --task "design a migration-safe auth refactor" --budget 900
 npm run sync -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions"
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow
 npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary, add tests, capture migration assumptions" --reviewNow --live
+npm run task -- --task "design a migration-safe auth refactor" --summary "Split auth boundary" --reviewNow --live --costMode saver
+npm run review -- --jobId memjob-123 --live --costMode strict --reviewProfile heavy
 npm run task -- --task "capture auth rollout learnings" --summary "Collapse duplicate auth notes" --artifacts "notes,worker" --reviewNow --live --provider cursor
 npm run queue
 npm run status
@@ -198,6 +200,8 @@ Daily ergonomics are better now too:
 
 - `node src/cli.mjs status` gives one compact snapshot of queue, worker, metrics, and recovery state
 - `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
+- `--costMode saver|balanced|strict` lets one live run be cheaper or stricter without editing `system.json`
+- `--reviewProfile light|auto|heavy` lets one live run force a lighter or heavier review profile
 
 This is the operator-facing layer: fewer manual file inspections, more direct answers about whether the runtime looks healthy.
 

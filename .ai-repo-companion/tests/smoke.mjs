@@ -38,6 +38,7 @@ import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-eng
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
 import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
+import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -717,6 +718,27 @@ const runtimeStatus = await getRuntimeStatus(statusRoot);
 assert.equal(runtimeStatus.queue.queued, 1);
 assert.equal(runtimeStatus.metrics.counters.processedJobs, 2);
 assert.equal(runtimeStatus.metrics.cost.liveTokensUsed, 0);
+assert.equal(runtimeStatus.costSummary.queuePressure.balancedQueued, 1);
+assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
+
+const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
+  costMode: "saver",
+  reviewProfile: "light"
+});
+assert.equal(saverCostConfig.runtimeCostControls.costMode, "saver");
+assert.equal(saverCostConfig.runtimeCostControls.reviewProfile, "light");
+assert.equal(saverCostConfig.reviewExecution.valueGate.minScore, 70);
+assert.equal(saverCostConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "medium");
+assert.equal(saverCostConfig.reviewExecution.reviewProfiles.expensive.promptStyle, "light");
+assert.equal(saverCostConfig.reviewExecution.operationRanking.maxAppliedOperations, 1);
+
+const strictCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
+  costMode: "strict",
+  reviewProfile: "heavy"
+});
+assert.equal(strictCostConfig.reviewExecution.reviewProfiles.balanced.promptStyle, "strict");
+assert.equal(strictCostConfig.reviewExecution.reviewProfiles.expensive.codexReasoningEffort, "high");
+assert.ok(strictCostConfig.reviewExecution.valueGate.minScore <= 45);
 
 const doctorRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-doctor-"));
 await fs.cp(path.resolve("config"), path.join(doctorRoot, "config"), { recursive: true });

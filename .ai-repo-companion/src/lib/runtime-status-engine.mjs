@@ -10,10 +10,13 @@ import { readJson } from "./store.mjs";
 // internals that a repo owner would have to mentally reconstruct.
 
 export async function getRuntimeStatus(rootDir) {
+  const queue = await inspectReviewQueue(rootDir);
+  const metrics = await summarizeReviewMetrics(rootDir);
   return {
-    queue: await inspectReviewQueue(rootDir),
+    queue,
     worker: await getWorkerState(rootDir),
-    metrics: await summarizeReviewMetrics(rootDir),
+    metrics,
+    costSummary: buildCostSummary(queue, metrics),
     recovery: await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null)
   };
 }
@@ -93,4 +96,44 @@ function diffMinutes(startAt, endAt) {
     return 0;
   }
   return Math.max(0, Math.floor((endMs - startMs) / 60000));
+}
+
+function buildCostSummary(queue, metrics) {
+  const liveTokensUsed = Number(metrics?.cost?.liveTokensUsed) || 0;
+  const avgTokensPerRun = Number(metrics?.cost?.avgTokensPerRun) || 0;
+  const avgTokensPerSelectedOperation = Number(metrics?.cost?.avgTokensPerSelectedOperation) || 0;
+  const topMode = metrics?.topTokenModes?.[0]?.key ?? null;
+  const topDomain = metrics?.topTokenDomains?.[0]?.key ?? null;
+  const balancedQueued = queue.jobs.filter((job) => job.status === "queued" && job.mode === "balanced").length;
+  const expensiveQueued = queue.jobs.filter((job) => job.status === "queued" && job.mode === "expensive").length;
+
+  return {
+    liveTokensUsed,
+    avgTokensPerRun,
+    avgTokensPerSelectedOperation,
+    highestCostMode: topMode,
+    highestCostDomain: topDomain,
+    queuePressure: {
+      balancedQueued,
+      expensiveQueued
+    },
+    recommendation: buildCostRecommendation({
+      avgTokensPerSelectedOperation,
+      balancedQueued,
+      expensiveQueued
+    })
+  };
+}
+
+function buildCostRecommendation(summary) {
+  if (summary.balancedQueued >= 2 && summary.avgTokensPerSelectedOperation >= 20000) {
+    return "Use --costMode saver for balanced live reviews until queue pressure drops.";
+  }
+  if (summary.expensiveQueued >= 1) {
+    return "Reserve strict live runs for high-risk jobs and let balanced jobs stay on the light lane.";
+  }
+  if (summary.avgTokensPerSelectedOperation > 0 && summary.avgTokensPerSelectedOperation <= 10000) {
+    return "Current live review cost looks healthy for the amount of useful note work getting through.";
+  }
+  return "No strong cost signal yet. Keep collecting local metrics before tightening policy again.";
 }
