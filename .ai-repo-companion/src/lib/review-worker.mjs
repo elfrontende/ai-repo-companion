@@ -4,6 +4,7 @@ import { assembleContext, loadNotes } from "./context-engine.mjs";
 import { executeReviewPayload, persistReviewReport } from "./provider-engine.mjs";
 import { applyReviewOperations } from "./review-note-engine.mjs";
 import { evaluateReviewOperations } from "./review-quality-engine.mjs";
+import { normalizeReviewOperations } from "./review-normalization-engine.mjs";
 
 // The review worker consumes queued memory jobs.
 // It is intentionally separate from the main sync path so background review
@@ -149,9 +150,11 @@ async function maybeApplyReviewOperations(rootDir, execution, timestamp) {
     };
   }
 
-  const qualityGate = await evaluateReviewOperations(rootDir, operations);
+  const normalized = await normalizeReviewOperations(rootDir, operations);
+  const qualityGate = await evaluateReviewOperations(rootDir, normalized.normalized);
   if (!qualityGate.passed) {
     return {
+      normalization: normalized,
       qualityGate,
       applied: [],
       skipped: qualityGate.rejected,
@@ -161,6 +164,7 @@ async function maybeApplyReviewOperations(rootDir, execution, timestamp) {
 
   const appliedResult = await applyReviewOperations(rootDir, qualityGate.accepted, { timestamp });
   return {
+    normalization: normalized,
     qualityGate,
     ...appliedResult
   };

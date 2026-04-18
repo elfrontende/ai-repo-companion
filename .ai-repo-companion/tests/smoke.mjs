@@ -14,6 +14,7 @@ import { applyReviewOperations } from "../src/lib/review-note-engine.mjs";
 import { getWorkerState, runReviewWorker } from "../src/lib/review-runner.mjs";
 import { runTaskFlow } from "../src/lib/task-flow-engine.mjs";
 import { evaluateReviewOperations } from "../src/lib/review-quality-engine.mjs";
+import { normalizeReviewOperations } from "../src/lib/review-normalization-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -207,6 +208,30 @@ assert.equal(gateResult.passed, true);
 assert.equal(gateResult.accepted.length, 1);
 assert.equal(gateResult.rejected.length, 1);
 assert.match(gateResult.rejected[0].reason, /too short/i);
+
+const normalizationResult = await normalizeReviewOperations(tempRoot, [
+  {
+    type: "append_note_update",
+    noteId: "z-000-index",
+    sourceNoteId: "",
+    targetNoteId: "",
+    title: "",
+    kind: "",
+    summary: "Normalize title-based links into stable note ids before apply.",
+    signals: ["Resolve note titles into real ids."],
+    tagsToAdd: [],
+    linksToAdd: ["Atomic Zettelkasten notes"],
+    tags: [],
+    links: ["Context minimization pipeline"]
+  }
+]);
+
+assert.equal(normalizationResult.normalized[0].linksToAdd[0], "z-110-atomic-notes");
+assert.equal(normalizationResult.normalized[0].links[0], "z-100-context-minimization");
+assert.ok(normalizationResult.changes.length >= 2);
+
+const gateAfterNormalization = await evaluateReviewOperations(tempRoot, normalizationResult.normalized);
+assert.equal(gateAfterNormalization.passed, true);
 
 const notesAfterMerge = await loadNotes(tempRoot);
 const mergeTarget = notesAfterMerge.find((note) => note.id === "z-130-background-memory-sync");
