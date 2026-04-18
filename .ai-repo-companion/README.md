@@ -141,6 +141,13 @@ one instead of creating another live review run. The merged job keeps a
 `tasks` list and `mergedTaskCount`, so the later review prompt still sees the
 full batch context.
 
+Stale-job policy is also enabled by default:
+
+- `stale` jobs are still allowed to run, but the worker marks them as stale and tells the model to rebuild judgment from current note snippets
+- `expired` jobs are skipped locally instead of spending a live model call on an outdated queue entry
+
+This reduces the chance of paying for review runs whose original queue reasons are no longer trustworthy.
+
 ## Codex first
 
 The first native provider path is Codex.

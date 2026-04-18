@@ -121,6 +121,12 @@
       "maxTasksPerJob": 3,
       "mergeWindowMinutes": 30
     },
+    "staleJobs": {
+      "enabled": true,
+      "staleAfterMinutes": 60,
+      "maxAgeMinutes": 240,
+      "skipExpired": true
+    },
     "commandAdapters": {
       "claude": {
         "enabled": false,

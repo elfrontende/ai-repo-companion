@@ -193,6 +193,12 @@ function buildReviewPrompt(payload) {
     `Domains: ${payload.job.domains.join(", ")}`,
     `Budget: ${payload.job.budget} tokens`,
     `Task: ${payload.job.task}`,
+    ...(payload.staleness?.level === "stale"
+      ? [
+        `Job staleness: stale (${payload.staleness.ageMinutes} minutes old)`,
+        "Rebuild your judgment from current note snippets instead of trusting the original queue reasons blindly."
+      ]
+      : []),
     ...(mergedTasks.length > 1
       ? [
         `Merged tasks in this review job: ${mergedTasks.length}`,

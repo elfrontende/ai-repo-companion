@@ -107,6 +107,95 @@ assert.ok(reviewReport.execution.output.prompt.includes("Review mode: expensive"
 const historyRaw = await fs.readFile(path.join(tempRoot, "state/reviews/history.jsonl"), "utf8");
 assert.ok(historyRaw.includes("\"adapter\":\"dry-run\""));
 
+const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
+const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");
+const staleCreatedAt = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+
+await fs.writeFile(staleQueuePath, JSON.stringify([
+  {
+    id: "memjob-stale-1",
+    createdAt: staleCreatedAt,
+    mode: "expensive",
+    budget: 700,
+    task: "re-score a stale auth migration review batch",
+    domains: ["auth", "migration", "architecture"],
+    reasons: ["Synthetic stale-job test."],
+    sourceEventId: "evt-stale-1",
+    sourceNoteId: "z-120-agent-orchestration",
+    sourceEventIds: ["evt-stale-1"],
+    sourceNoteIds: ["z-120-agent-orchestration"],
+    tasks: [
+      {
+        task: "re-score a stale auth migration review batch",
+        reasons: ["Synthetic stale-job test."],
+        sourceEventId: "evt-stale-1",
+        sourceNoteId: "z-120-agent-orchestration",
+        addedAt: staleCreatedAt
+      }
+    ],
+    mergedTaskCount: 1,
+    status: "queued"
+  }
+], null, 2));
+await fs.writeFile(stalePolicyStatePath, JSON.stringify({
+  domains: {
+    auth: { eventCount: 1, queuedJobs: 1, lastTask: null, lastMode: "expensive", lastUpdatedAt: staleCreatedAt }
+  },
+  recentModes: [],
+  lastDecisionAt: staleCreatedAt
+}, null, 2));
+
+const staleRun = await processReviewQueue(tempRoot, config, { maxJobs: 1 });
+assert.equal(staleRun.processedCount, 1);
+assert.equal(staleRun.processed[0].adapter, "dry-run");
+const staleReport = await readJson(staleRun.processed[0].reportPath, null);
+assert.equal(staleReport.staleness.level, "stale");
+assert.equal(staleReport.execution.adapter, "dry-run");
+assert.match(staleReport.execution.output.prompt, /Job staleness: stale/);
+
+const expiredCreatedAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+await fs.writeFile(staleQueuePath, JSON.stringify([
+  {
+    id: "memjob-expired-1",
+    createdAt: expiredCreatedAt,
+    mode: "expensive",
+    budget: 700,
+    task: "skip an expired auth migration review batch",
+    domains: ["auth", "migration", "architecture"],
+    reasons: ["Synthetic expired-job test."],
+    sourceEventId: "evt-expired-1",
+    sourceNoteId: "z-120-agent-orchestration",
+    sourceEventIds: ["evt-expired-1"],
+    sourceNoteIds: ["z-120-agent-orchestration"],
+    tasks: [
+      {
+        task: "skip an expired auth migration review batch",
+        reasons: ["Synthetic expired-job test."],
+        sourceEventId: "evt-expired-1",
+        sourceNoteId: "z-120-agent-orchestration",
+        addedAt: expiredCreatedAt
+      }
+    ],
+    mergedTaskCount: 1,
+    status: "queued"
+  }
+], null, 2));
+await fs.writeFile(stalePolicyStatePath, JSON.stringify({
+  domains: {
+    auth: { eventCount: 1, queuedJobs: 1, lastTask: null, lastMode: "expensive", lastUpdatedAt: expiredCreatedAt }
+  },
+  recentModes: [],
+  lastDecisionAt: expiredCreatedAt
+}, null, 2));
+
+const expiredRun = await processReviewQueue(tempRoot, config, { maxJobs: 1 });
+assert.equal(expiredRun.processedCount, 1);
+assert.equal(expiredRun.processed[0].adapter, "stale-policy");
+const expiredReport = await readJson(expiredRun.processed[0].reportPath, null);
+assert.equal(expiredReport.staleness.level, "expired");
+assert.equal(expiredReport.execution.adapter, "stale-policy");
+assert.match(expiredReport.noteChanges.reason, /too old/i);
+
 const idempotencyResult = await applyIdempotencyGuard(tempRoot, [
   {
     type: "create_note",

@@ -314,6 +314,12 @@ function describeRuntimeReviewConfig(config) {
       enabled: config.reviewExecution?.queueCompaction?.enabled !== false,
       maxTasksPerJob: config.reviewExecution?.queueCompaction?.maxTasksPerJob ?? 3,
       mergeWindowMinutes: config.reviewExecution?.queueCompaction?.mergeWindowMinutes ?? 30
+    },
+    staleJobs: {
+      enabled: config.reviewExecution?.staleJobs?.enabled !== false,
+      staleAfterMinutes: config.reviewExecution?.staleJobs?.staleAfterMinutes ?? 60,
+      maxAgeMinutes: config.reviewExecution?.staleJobs?.maxAgeMinutes ?? 240,
+      skipExpired: config.reviewExecution?.staleJobs?.skipExpired !== false
     }
   };
 }
