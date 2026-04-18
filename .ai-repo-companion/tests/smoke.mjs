@@ -35,6 +35,7 @@ import {
 import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
+import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -588,6 +589,78 @@ assert.equal(staleLockRun.lock.acquired, true);
 assert.equal(staleLockRun.processedCount, 1);
 const staleLockFile = await readJson(path.join(staleLockRoot, "state/reviews/worker-lock.json"), {});
 assert.deepEqual(staleLockFile, {});
+
+const statusRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-status-"));
+await fs.cp(path.resolve("config"), path.join(statusRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(statusRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(statusRoot, "state"), { recursive: true });
+await ensureWorkspace(statusRoot);
+
+await writeJson(path.join(statusRoot, "state/memory/review-queue.json"), [
+  {
+    id: "memjob-status-1",
+    createdAt: "2026-04-18T05:00:00.000Z",
+    status: "queued",
+    mode: "balanced",
+    domains: ["docs"]
+  }
+]);
+await writeJson(path.join(statusRoot, "state/reviews/metrics.json"), {
+  schemaVersion: 1,
+  updatedAt: "2026-04-18T05:05:00.000Z",
+  counters: {
+    processedJobs: 2,
+    completedJobs: 2,
+    failedJobs: 0,
+    skippedJobs: 0,
+    awaitingApprovalJobs: 0,
+    approvalsApplied: 0,
+    approvalsExpiredRequeued: 0,
+    approvalsExpiredClosed: 0,
+    recoveredRuns: 0,
+    noteApplyRuns: 1,
+    appliedOperations: 1,
+    skippedOperations: 0,
+    rejectedOperations: 0,
+    deferredOperations: 0
+  },
+  latencies: {
+    queueMinutes: { count: 2, total: 20, max: 15, last: 5 },
+    approvalMinutes: { count: 0, total: 0, max: 0, last: 0 }
+  },
+  byAdapter: { "dry-run": 2 },
+  byMode: { balanced: 2 },
+  recentEvents: []
+});
+
+const runtimeStatus = await getRuntimeStatus(statusRoot);
+assert.equal(runtimeStatus.queue.queued, 1);
+assert.equal(runtimeStatus.metrics.counters.processedJobs, 2);
+
+const doctorRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-doctor-"));
+await fs.cp(path.resolve("config"), path.join(doctorRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(doctorRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(doctorRoot, "state"), { recursive: true });
+await ensureWorkspace(doctorRoot);
+
+await writeJson(path.join(doctorRoot, "state/memory/review-queue.json"), [
+  {
+    id: "memjob-doctor-1",
+    createdAt: "2026-04-18T05:10:00.000Z",
+    finishedAt: "2026-04-18T05:11:00.000Z",
+    status: "awaiting-approval",
+    mode: "expensive",
+    domains: ["security"],
+    approval: {
+      status: "pending",
+      approvalPath: path.join(doctorRoot, "state/reviews/approvals/missing.json")
+    }
+  }
+]);
+
+const doctorStatus = await runRuntimeDoctor(doctorRoot, await readJson(path.join(doctorRoot, "config/system.json"), {}));
+assert.equal(doctorStatus.ok, false);
+assert.ok(doctorStatus.findings.some((finding) => finding.code === "missing-approval-file"));
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

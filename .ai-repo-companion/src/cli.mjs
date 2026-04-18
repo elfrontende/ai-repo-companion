@@ -12,6 +12,7 @@ import { getWorkerState, runReviewWorker } from "./lib/review-runner.mjs";
 import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning } from "./lib/policy-tuning-engine.mjs";
+import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,6 +57,12 @@ switch (command) {
     break;
   case "queue":
     output(await runQueue());
+    break;
+  case "status":
+    output(await runStatus());
+    break;
+  case "doctor":
+    output(await runDoctor());
     break;
   case "metrics":
     output(await runMetrics());
@@ -146,6 +153,22 @@ async function runQueue() {
     rootDir,
     mode: "queue",
     queue: await inspectReviewQueue(rootDir)
+  };
+}
+
+async function runStatus() {
+  return {
+    rootDir,
+    mode: "status",
+    status: await getRuntimeStatus(rootDir)
+  };
+}
+
+async function runDoctor() {
+  return {
+    rootDir,
+    mode: "doctor",
+    doctor: await runRuntimeDoctor(rootDir, systemConfig)
   };
 }
 
@@ -298,6 +321,8 @@ function helpText() {
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
       "node src/cli.mjs queue",
+      "node src/cli.mjs status",
+      "node src/cli.mjs doctor",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
       "node src/cli.mjs tune --apply",

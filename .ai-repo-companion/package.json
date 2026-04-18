@@ -12,6 +12,8 @@
     "sync": "node src/cli.mjs sync",
     "task": "node src/cli.mjs task",
     "queue": "node src/cli.mjs queue",
+    "status": "node src/cli.mjs status",
+    "doctor": "node src/cli.mjs doctor",
     "metrics": "node src/cli.mjs metrics",
     "tune": "node src/cli.mjs tune",
     "review": "node src/cli.mjs review",
