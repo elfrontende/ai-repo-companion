@@ -10,6 +10,7 @@ const seedFiles = [
   "state/memory/policy-state.json",
   "state/memory/review-queue.json",
   "state/reviews/history.jsonl",
+  "state/reviews/metrics.json",
   "state/reviews/recovery-state.json",
   "state/reviews/worker-state.json",
   "notes/000-index.md",

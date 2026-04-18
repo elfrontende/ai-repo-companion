@@ -12,6 +12,7 @@
     "sync": "node src/cli.mjs sync",
     "task": "node src/cli.mjs task",
     "queue": "node src/cli.mjs queue",
+    "metrics": "node src/cli.mjs metrics",
     "review": "node src/cli.mjs review",
     "worker": "node src/cli.mjs worker",
     "demo": "node src/cli.mjs demo",

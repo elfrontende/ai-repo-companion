@@ -32,6 +32,7 @@ import {
   beginReviewApplyRecovery,
   recoverInterruptedReviewRun
 } from "../src/lib/review-recovery-engine.mjs";
+import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -121,6 +122,10 @@ assert.ok(reviewReport.execution.output.prompt.includes("Review mode: expensive"
 
 const historyRaw = await fs.readFile(path.join(tempRoot, "state/reviews/history.jsonl"), "utf8");
 assert.ok(historyRaw.includes("\"adapter\":\"dry-run\""));
+const firstMetrics = await summarizeReviewMetrics(tempRoot);
+assert.equal(firstMetrics.counters.processedJobs, 1);
+assert.equal(firstMetrics.counters.completedJobs, 1);
+assert.ok(firstMetrics.topAdapters.some((entry) => entry.key === "dry-run"));
 
 const retentionRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-retention-"));
 await fs.mkdir(path.join(retentionRoot, "state/reviews/reports"), { recursive: true });
@@ -223,6 +228,8 @@ assert.match(recoveredReport.noteChanges.reason, /interrupted/i);
 
 const recoveryHistoryRaw = await fs.readFile(recoveryHistoryPath, "utf8");
 assert.match(recoveryHistoryRaw, /"adapter":"recovery-policy"/);
+const recoveryMetrics = await summarizeReviewMetrics(recoveryRoot);
+assert.equal(recoveryMetrics.counters.recoveredRuns, 1);
 
 const approvalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-approval-"));
 await fs.cp(path.resolve("config"), path.join(approvalRoot, "config"), { recursive: true });
@@ -332,6 +339,9 @@ assert.match(approvalReport.noteChanges.reason, /approved and applied/i);
 
 const approvalHistoryRaw = await fs.readFile(path.join(approvalRoot, "state/reviews/history.jsonl"), "utf8");
 assert.match(approvalHistoryRaw, /"adapter":"approval-policy"/);
+const approvalMetrics = await summarizeReviewMetrics(approvalRoot);
+assert.equal(approvalMetrics.counters.approvalsApplied, 1);
+assert.ok(approvalMetrics.approvalLatency.count >= 1);
 
 await fs.access(createdApproval.approvalPath).then(
   () => Promise.reject(new Error("Approval file should be removed after apply.")),
@@ -396,6 +406,8 @@ assert.equal(requeueQueue[0].approval.action, "requeue");
 const requeueExpiredReport = await readJson(requeueApprovalJob.reportPath, null);
 assert.equal(requeueExpiredReport.noteChanges.approval.status, "expired");
 assert.equal(requeueExpiredReport.noteChanges.approval.action, "requeue");
+const requeueExpiryMetrics = await summarizeReviewMetrics(approvalExpiryRequeueRoot);
+assert.equal(requeueExpiryMetrics.counters.approvalsExpiredRequeued, 1);
 await fs.access(requeueApprovalJob.approval.approvalPath).then(
   () => Promise.reject(new Error("Expired requeue approval file should be removed.")),
   () => Promise.resolve()
@@ -460,6 +472,8 @@ assert.equal(expireExpiredReport.noteChanges.approval.status, "expired");
 assert.equal(expireExpiredReport.noteChanges.approval.action, "expire");
 const approvalExpiryHistoryRaw = await fs.readFile(approvalExpireHistoryPath, "utf8");
 assert.match(approvalExpiryHistoryRaw, /"adapter":"approval-expiry-policy"/);
+const expireExpiryMetrics = await summarizeReviewMetrics(approvalExpiryExpireRoot);
+assert.equal(expireExpiryMetrics.counters.approvalsExpiredClosed, 1);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

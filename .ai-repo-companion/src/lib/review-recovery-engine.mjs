@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendLine, readJson, writeJson } from "./store.mjs";
+import { recordReviewMetricsEvent } from "./review-metrics-engine.mjs";
 
 // Recovery sessions protect the tiny window between
 // "the model already returned note operations"
@@ -133,6 +134,13 @@ export async function recoverInterruptedReviewRun(rootDir, config = {}) {
     adapter: "recovery-policy",
     reportPath: recoveryState.reportPath ?? null
   }));
+  await recordReviewMetricsEvent(rootDir, {
+    type: "recovery-run",
+    at: recoveredAt,
+    jobId: recoveryState.jobId,
+    status: "recovered",
+    recovered: true
+  });
 
   await completeReviewApplyRecovery(rootDir, recoveryState, recoveryConfig);
 
