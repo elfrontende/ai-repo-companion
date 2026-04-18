@@ -19,6 +19,7 @@ import {
   completeReviewApplyRecovery,
   recoverInterruptedReviewRun
 } from "./review-recovery-engine.mjs";
+import { acquireReviewLock, releaseReviewLock } from "./review-lock-engine.mjs";
 import { recordReviewMetricsEvent } from "./review-metrics-engine.mjs";
 
 // The review worker consumes queued memory jobs.
@@ -39,6 +40,34 @@ export async function inspectReviewQueue(rootDir) {
 }
 
 export async function processReviewQueue(rootDir, config, options = {}) {
+  const runtimeLock = await acquireReviewLock(rootDir, config.reviewExecution?.runtimeLock ?? {});
+  if (!runtimeLock.acquired) {
+    return {
+      lock: runtimeLock,
+      recovery: {
+        recovered: false,
+        reason: "Review queue was not touched because another worker owns the runtime lock."
+      },
+      approvalExpiry: {
+        checked: 0,
+        expired: 0,
+        requeued: 0,
+        completed: 0,
+        changed: false
+      },
+      processedCount: 0,
+      processed: [],
+      retention: {
+        enabled: false,
+        deletedReportCount: 0,
+        trimmedHistoryEntries: 0,
+        remainingReportCount: 0,
+        remainingHistoryEntries: 0
+      }
+    };
+  }
+
+  try {
   // Recovery runs first on every worker invocation.
   // If the previous process died during note apply, we want to restore notes
   // before touching the queue again.
@@ -326,12 +355,16 @@ export async function processReviewQueue(rootDir, config, options = {}) {
   const retention = await applyReviewRetention(rootDir, config.reviewExecution?.retention ?? {});
 
   return {
+    lock: runtimeLock,
     recovery,
     approvalExpiry,
     processedCount: processed.length,
     processed,
     retention
   };
+  } finally {
+    await releaseReviewLock(rootDir, runtimeLock);
+  }
 }
 
 export async function applyReviewRetention(rootDir, config = {}) {

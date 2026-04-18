@@ -202,6 +202,14 @@ Pending approvals are also time-bounded now:
 
 This prevents old approval snapshots from sitting around until they no longer match the current note graph.
 
+Runtime locking is enabled by default:
+
+- every `review` or `worker` run first tries to acquire `state/reviews/worker-lock.json`
+- if another fresh process already owns the lock, the new run exits cleanly without touching the queue
+- stale locks are broken automatically after `runtimeLock.maxAgeMinutes`
+
+This prevents two local processes from mutating the review queue and note graph at the same time.
+
 ## Codex first
 
 The first native provider path is Codex.
