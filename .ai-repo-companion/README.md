@@ -207,6 +207,7 @@ Daily ergonomics are better now too:
 - `status` now also returns `nextActions`, a short prioritized list of the most useful local commands to run next
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
 - ranked status items now also include short explanation fields like `whyRanked` and `whyNow`, so the operator can quickly see why a domain or action is currently prioritized
+- ranked status and action items now also include compact `riskLevel` and `expected...` fields, so operators can judge likely savings versus blast radius without reading raw benchmark JSON
 - `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `doctor` also warns when a cheap domain like `docs` or `deploy` keeps favoring `saver` but its `minScoreByDomain` threshold is still too loose
 - `doctor` now also flags noisy domains whose cheapest variant flips too often, so auto-tune waits for steadier benchmark evidence
@@ -238,6 +239,7 @@ Policy tuning is now metrics-aware:
 - tune analysis now also returns a small ordered `tuningPlan`, so cheap-domain fixes are sequenced before broader balanced-lane or global policy changes
 - tuning suggestions and tuning-plan steps now also include small `expectedImpact` previews, so the operator can see which domains or token deltas each bounded change is targeting
 - tuning-plan steps now also include `whyThisPhase`, so the operator can see why cheap-domain fixes should land before broader lane changes
+- tuning suggestions and phases now also expose compact impact/risk summaries, so `tune` shows both likely savings and likely blast radius before anything is applied
 - `tune`, `tune --apply`, and `tune --auto` now support `--phase cheap-domains|balanced-lane|global-policy|manual-checkpoints` for bounded phase-by-phase execution
 - `tune --reconcile` now also supports `--phase ...`, so a regressing canary can roll back only the risky phase first instead of discarding the entire bounded tune set at once
 - `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`

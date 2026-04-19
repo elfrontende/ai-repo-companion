@@ -703,13 +703,25 @@ assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval
 assert.equal(tuningAnalysis.tuningPlan.steps[0].phase, "cheap-domains");
 assert.ok(tuningAnalysis.tuningPlan.steps[0].suggestionIds.includes("domain-tighten-value-gate-docs"));
 assert.equal(tuningAnalysis.tuningPlan.steps[0].expectedImpact.domains[0].domain, "docs");
+assert.equal(tuningAnalysis.tuningPlan.steps[0].riskLevel, "low");
+assert.match(tuningAnalysis.tuningPlan.steps[0].expectedImpactSummary, /cheap domains/i);
 assert.match(tuningAnalysis.tuningPlan.steps[0].whyThisPhase, /starts there/i);
 assert.ok(tuningAnalysis.tuningPlan.steps[1].suggestionIds.includes("benchmark-lower-balanced-effort"));
 assert.ok(tuningAnalysis.tuningPlan.steps[1].expectedImpact.estimatedTokenDelta > 0);
+assert.equal(tuningAnalysis.tuningPlan.steps[1].riskLevel, "medium");
+assert.match(tuningAnalysis.tuningPlan.steps[1].expectedImpactSummary, /balanced-lane/i);
 assert.match(tuningAnalysis.tuningPlan.steps[1].whyThisPhase, /extra tokens/i);
 assert.equal(
   tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").expectedImpact.domain,
   "docs"
+);
+assert.equal(
+  tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").riskLevel,
+  "low"
+);
+assert.match(
+  tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").expectedImpactSummary,
+  /docs is carrying/i
 );
 const phaseOnlyAnalysis = await analyzePolicyTuning(tuningRoot, { phase: "cheap-domains" });
 assert.equal(phaseOnlyAnalysis.selectedPhase, "cheap-domains");
@@ -1401,8 +1413,12 @@ assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics.find((item) => ite
 assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
 assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
 assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].domain, "docs");
+assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].riskLevel, "low");
+assert.match(runtimeStatus.benchmarkSummary.topWasteDomains[0].expectedSavingsHint, /recover roughly/i);
 assert.match(runtimeStatus.benchmarkSummary.topWasteDomains[0].whyRanked, /docs is consuming/i);
 assert.equal(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].domain, "docs");
+assert.equal(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].riskLevel, "low");
+assert.match(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].expectedSavingsHint, /recover roughly/i);
 assert.match(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].whyRanked, /stable saver streak/i);
 assert.equal(runtimeStatus.benchmarkCycleSummary.loaded, true);
 assert.equal(runtimeStatus.benchmarkCycleSummary.trendDirection, "improving");
@@ -1411,6 +1427,8 @@ assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
 assert.ok(typeof runtimeStatus.nextActions[0].whyNow === "string");
+assert.equal(runtimeStatus.nextActions[0].riskLevel, "low");
+assert.ok(typeof runtimeStatus.nextActions[0].expectedOutcome === "string");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
 
 const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
@@ -1423,6 +1441,8 @@ assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-signal-noi
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "benchmark-cycle-improving"));
 assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune --auto");
 assert.ok(typeof runtimeDoctor.recommendedActions[0].whyNow === "string");
+assert.equal(runtimeDoctor.recommendedActions[0].riskLevel, "medium");
+assert.ok(typeof runtimeDoctor.recommendedActions[0].expectedOutcome === "string");
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",

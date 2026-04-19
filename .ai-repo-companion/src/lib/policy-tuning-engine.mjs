@@ -27,7 +27,11 @@ export async function analyzePolicyTuning(rootDir, options = {}) {
     metrics,
     benchmark,
     selectedPhase,
-    suggestions,
+    suggestions: suggestions.map((suggestion) => ({
+      ...suggestion,
+      riskLevel: inferSuggestionRisk(suggestion),
+      expectedImpactSummary: summarizeSuggestionImpact(suggestion)
+    })),
     tuningPlan,
     summary: {
       benchmarkLoaded: Boolean(benchmark?.aggregate),
@@ -722,6 +726,8 @@ function buildTuningPlan(suggestions) {
       title: step.title,
       suggestionIds: step.suggestions.map((item) => item.id),
       expectedImpact: summarizePlanStepImpact(step.suggestions),
+      expectedImpactSummary: summarizePlanStepText(step.suggestions),
+      riskLevel: inferPlanPhaseRisk(step.phase),
       whyThisPhase: explainPlanPhase(step.phase, step.suggestions),
       autoApplicableCount: step.suggestions.filter((item) => item.canAutoApply).length,
       applyableCount: step.suggestions.filter((item) => item.canApply).length
@@ -789,6 +795,65 @@ function summarizePlanStepImpact(suggestions) {
     estimatedTokenDelta: balancedImpacts.reduce((total, impact) => total + (Number(impact.estimatedTokenDelta) || 0), 0),
     affectedDomains: [...new Set(balancedImpacts.flatMap((impact) => impact.affectedDomains ?? []))]
   };
+}
+
+function summarizePlanStepText(suggestions) {
+  const domainImpacts = suggestions
+    .map((item) => item.expectedImpact)
+    .filter((impact) => impact?.type === "domain-value-gate");
+  if (domainImpacts.length > 0) {
+    const domains = domainImpacts.map((impact) => impact.domain).join(", ");
+    const liveTokens = domainImpacts.reduce((total, impact) => total + (Number(impact.liveTokensUsed) || 0), 0);
+    return `Targets cheap domains (${domains}) with about ${liveTokens} recent live tokens attached to the current drift signal.`;
+  }
+
+  const balancedImpacts = suggestions
+    .map((item) => item.expectedImpact)
+    .filter((impact) => impact?.type === "balanced-lane");
+  if (balancedImpacts.length > 0) {
+    const estimatedTokenDelta = balancedImpacts.reduce((total, impact) => total + (Number(impact.estimatedTokenDelta) || 0), 0);
+    return `Targets broader balanced-lane behavior with an estimated ${estimatedTokenDelta} token gap versus the leaner saver lane.`;
+  }
+
+  return "Targets bounded policy changes that should have limited blast radius but still improve operator control.";
+}
+
+function inferSuggestionRisk(suggestion) {
+  const effectType = suggestion.expectedImpact?.type ?? "other";
+  if (effectType === "domain-value-gate") {
+    return "low";
+  }
+  if (effectType === "balanced-lane") {
+    return "medium";
+  }
+  if (suggestion.id === "extend-approval-ttl" || suggestion.id === "widen-expiry-action") {
+    return "medium";
+  }
+  return "medium";
+}
+
+function summarizeSuggestionImpact(suggestion) {
+  const impact = suggestion.expectedImpact ?? null;
+  if (impact?.type === "domain-value-gate") {
+    return `${impact.domain} is carrying ${impact.liveTokensUsed} live tokens with a ${impact.reductionGap.toFixed(2)} point saver advantage, so this raises only that cheap-domain gate by ${impact.thresholdDelta}.`;
+  }
+  if (impact?.type === "balanced-lane") {
+    const domains = (impact.affectedDomains ?? []).join(", ");
+    return domains
+      ? `Touches the balanced lane across ${domains} and aims to recover about ${impact.estimatedTokenDelta} tokens from the current saver gap.`
+      : `Touches the balanced lane and aims to recover about ${impact.estimatedTokenDelta} tokens from the current saver gap.`;
+  }
+  return "Applies a bounded runtime-policy change with limited surface area.";
+}
+
+function inferPlanPhaseRisk(phase) {
+  if (phase === "cheap-domains") {
+    return "low";
+  }
+  if (phase === "balanced-lane") {
+    return "medium";
+  }
+  return "medium";
 }
 
 function applyConfigPatch(config, pathSegments, value) {
