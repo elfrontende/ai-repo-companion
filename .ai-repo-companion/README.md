@@ -203,8 +203,10 @@ Daily ergonomics are better now too:
 - `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
 - `status` now also surfaces the latest benchmark summary and last auto-tune snapshot
 - `status` also includes domain diagnostics for low-risk domains, so you can see which domain is burning tokens and which one still has value-gate drift
+- `status` now also returns `nextActions`, a short prioritized list of the most useful local commands to run next
 - `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `doctor` also warns when a cheap domain like `docs` or `deploy` keeps favoring `saver` but its `minScoreByDomain` threshold is still too loose
+- `doctor` now also returns `recommendedActions`, so the diagnostics come with a small operator playbook instead of only raw findings
 - `--costMode saver|balanced|strict` lets one live run be cheaper or stricter without editing `system.json`
 - `--reviewProfile light|auto|heavy` lets one live run force a lighter or heavier review profile
 

@@ -14,13 +14,15 @@ export async function getRuntimeStatus(rootDir, config = {}) {
   const metrics = await summarizeReviewMetrics(rootDir);
   const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
   const tuningSummary = await readTuningSummary(rootDir, config);
+  const costSummary = buildCostSummary(queue, metrics);
   return {
     queue,
     worker: await getWorkerState(rootDir),
     metrics,
-    costSummary: buildCostSummary(queue, metrics),
+    costSummary,
     benchmarkSummary,
     tuningSummary,
+    nextActions: buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSummary),
     recovery: await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null)
   };
 }
@@ -164,6 +166,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     metrics,
     benchmarkSummary,
     tuningSummary,
+    recommendedActions: buildDoctorRecommendedActions(findings),
     recovery,
     lock: lock ?? {},
     findings
@@ -309,4 +312,120 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
       }
       return right.reductionGap - left.reductionGap;
     });
+}
+
+function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSummary) {
+  const actions = [];
+
+  if (!benchmarkSummary.loaded) {
+    actions.push({
+      priority: 100,
+      action: "node src/cli.mjs benchmark",
+      reason: "No synthetic benchmark exists yet, so tuning and cost guidance are still blind."
+    });
+  } else if (benchmarkSummary.isStale) {
+    actions.push({
+      priority: 95,
+      action: "node src/cli.mjs benchmark",
+      reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading."
+    });
+  }
+
+  if (tuningSummary.canaryStatus === "pending") {
+    actions.push({
+      priority: 92,
+      action: "node src/cli.mjs tune --reconcile",
+      reason: "A pending canary is waiting for a post-tune benchmark verdict."
+    });
+  }
+
+  if (benchmarkSummary.tuningComparison?.available && benchmarkSummary.tuningComparison.outcome === "degraded") {
+    actions.push({
+      priority: 90,
+      action: "node src/cli.mjs tune --reconcile",
+      reason: benchmarkSummary.tuningComparison.summary
+    });
+  }
+
+  const driftingDomain = benchmarkSummary.domainDiagnostics.find((item) => item.shouldTightenValueGate);
+  if (driftingDomain) {
+    actions.push({
+      priority: 80,
+      action: "node src/cli.mjs tune --auto",
+      reason: `${driftingDomain.domain} still favors saver and is burning tokens above its configured domain gate.`
+    });
+  }
+
+  if (benchmarkSummary.cheapestVariant === "saver" && tuningSummary.isStale) {
+    actions.push({
+      priority: 70,
+      action: "node src/cli.mjs tune --auto",
+      reason: "Saver keeps winning synthetic cost checks, but the last auto-tune is stale."
+    });
+  }
+
+  if (costSummary.queuePressure.balancedQueued >= 2 && costSummary.avgTokensPerSelectedOperation >= 20000) {
+    actions.push({
+      priority: 60,
+      action: "Run the next live balanced review with --costMode saver",
+      reason: "Balanced queue pressure is high while useful note work per token is still expensive."
+    });
+  }
+
+  if (queue.awaitingApproval > 0) {
+    actions.push({
+      priority: 55,
+      action: "node src/cli.mjs queue",
+      reason: "There are pending approvals waiting for a manual decision before notes can change."
+    });
+  }
+
+  return actions
+    .sort((left, right) => right.priority - left.priority)
+    .slice(0, 5);
+}
+
+function buildDoctorRecommendedActions(findings) {
+  const actions = [];
+  const push = (condition, priority, action, reason) => {
+    if (!condition) {
+      return;
+    }
+    actions.push({ priority, action, reason });
+  };
+
+  push(
+    findings.some((item) => item.code === "benchmark-missing" || item.code === "benchmark-stale"),
+    100,
+    "node src/cli.mjs benchmark",
+    "Refresh synthetic cost evidence before trusting runtime recommendations."
+  );
+  push(
+    findings.some((item) => item.code === "post-tune-benchmark-degraded" || item.code === "canary-pending-reconcile"),
+    95,
+    "node src/cli.mjs tune --reconcile",
+    "Resolve or roll back the most recent auto-tune before stacking more tuning changes."
+  );
+  push(
+    findings.some((item) => item.code.startsWith("domain-value-gate-drift-")) || findings.some((item) => item.code === "auto-tune-stale"),
+    85,
+    "node src/cli.mjs tune --auto",
+    "The cheap balanced lane has visible drift that bounded auto-tune can usually tighten safely."
+  );
+  push(
+    findings.some((item) => item.code === "missing-approval-file"),
+    80,
+    "Inspect state/reviews/approvals and rerun review or approval flow",
+    "Approval state is inconsistent and should be repaired before more queue work proceeds."
+  );
+  push(
+    findings.some((item) => item.code === "stale-lock" || item.code === "recovery-pending"),
+    75,
+    "node src/cli.mjs worker --maxJobs 1",
+    "A single worker pass should clear stale runtime state or finish recovery."
+  );
+
+  return actions
+    .sort((left, right) => right.priority - left.priority)
+    .slice(0, 5);
 }

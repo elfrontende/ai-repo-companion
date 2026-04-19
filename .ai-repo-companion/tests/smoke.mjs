@@ -1244,6 +1244,7 @@ assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStre
 assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
+assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
 
 const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
@@ -1252,6 +1253,7 @@ assert.ok(runtimeDoctor.findings.some((item) => item.code === "balanced-lane-hea
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "auto-tune-stale"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate-drift-docs"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "post-tune-benchmark-improved"));
+assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune --auto");
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
@@ -1296,6 +1298,7 @@ await writeJson(path.join(doctorRoot, "state/memory/review-queue.json"), [
 const doctorStatus = await runRuntimeDoctor(doctorRoot, await readJson(path.join(doctorRoot, "config/system.json"), {}));
 assert.equal(doctorStatus.ok, false);
 assert.ok(doctorStatus.findings.some((finding) => finding.code === "missing-approval-file"));
+assert.ok(doctorStatus.recommendedActions.some((item) => item.action === "Inspect state/reviews/approvals and rerun review or approval flow"));
 
 const benchmarkRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-benchmark-"));
 await fs.cp(path.resolve("config"), path.join(benchmarkRoot, "config"), { recursive: true });
