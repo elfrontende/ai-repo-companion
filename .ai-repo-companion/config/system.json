@@ -303,6 +303,9 @@
     "historyRetentionEntries": 100,
     "benchmarkHistoryRetentionEntries": 50,
     "benchmarkTrendWindow": 5,
+    "benchmarkCycleHistoryRetentionEntries": 20,
+    "benchmarkCycleTrendWindow": 4,
+    "benchmarkCycleFreshnessMinutes": 2880,
     "rollbackRegressionThresholdPercent": 3,
     "rollbackOnCheapestVariantShift": true,
     "canaryDomains": [
