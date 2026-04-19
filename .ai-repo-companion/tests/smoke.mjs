@@ -1393,6 +1393,15 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark-cycle.jso
       flat: 1
     },
     trendDirection: "improving",
+    windowComparison: {
+      available: true,
+      windowSize: 2,
+      currentWindowAverage: 4.25,
+      previousWindowAverage: 1.25,
+      delta: 3,
+      direction: "improving",
+      recommendation: "The last 2 cycle runs are improving by 3.00 balanced points versus the previous window."
+    },
     recommendation: "Recent benchmark cycles are consistently improving, with an average balanced delta of 3.25 points."
   }
 });
@@ -1423,6 +1432,8 @@ assert.match(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].whyRanke
 assert.equal(runtimeStatus.benchmarkCycleSummary.loaded, true);
 assert.equal(runtimeStatus.benchmarkCycleSummary.trendDirection, "improving");
 assert.equal(runtimeStatus.benchmarkCycleSummary.latestOutcomeStreak, 2);
+assert.equal(runtimeStatus.benchmarkCycleSummary.windowComparison.available, true);
+assert.equal(runtimeStatus.benchmarkCycleSummary.windowComparison.direction, "improving");
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
@@ -1439,6 +1450,7 @@ assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "post-tune-benchmark-improved"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-signal-noisy-ui"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "benchmark-cycle-improving"));
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "benchmark-cycle-window-improving"));
 assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune --auto");
 assert.ok(typeof runtimeDoctor.recommendedActions[0].whyNow === "string");
 assert.equal(runtimeDoctor.recommendedActions[0].riskLevel, "medium");
@@ -1590,7 +1602,17 @@ cycleConfig.tuning.benchmarkTrendWindow = 3;
 cycleConfig.tuning.autoApplyEnabled = true;
 cycleConfig.tuning.cooldownMinutes = 0;
 cycleConfig.tuning.maxAutoApplySuggestionsPerRun = 2;
+cycleConfig.tuning.benchmarkCycleComparisonWindow = 2;
 await writeJson(path.join(benchmarkCycleRoot, "config/system.json"), cycleConfig);
+await fs.writeFile(
+  path.join(benchmarkCycleRoot, "state/benchmarks/history-cycle-low-risk.jsonl"),
+  [
+    JSON.stringify({ generatedAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(), suite: "low-risk", summary: { outcome: "flat", balancedReductionPercentDelta: 1, rollbackCount: 0 } }),
+    JSON.stringify({ generatedAt: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(), suite: "low-risk", summary: { outcome: "flat", balancedReductionPercentDelta: 1.5, rollbackCount: 0 } }),
+    JSON.stringify({ generatedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(), suite: "low-risk", summary: { outcome: "improved", balancedReductionPercentDelta: 3, rollbackCount: 0 } })
+  ].join("\n") + "\n",
+  "utf8"
+);
 const benchmarkCycle = await runSyntheticBenchmarkCycle(benchmarkCycleRoot, {
   iterations: 3,
   autoTuneBetweenRuns: true,
@@ -1604,11 +1626,13 @@ assert.ok(typeof benchmarkCycle.summary.recommendation === "string");
 assert.ok(Number.isFinite(benchmarkCycle.summary.tuningRunCount));
 assert.equal(benchmarkCycle.multiCycle.available, true);
 assert.ok(["improving", "degrading", "mixed"].includes(benchmarkCycle.multiCycle.trendDirection));
+assert.equal(benchmarkCycle.multiCycle.windowComparison.available, true);
+assert.ok(["improving", "degrading", "flat"].includes(benchmarkCycle.multiCycle.windowComparison.direction));
 const storedCycleReport = await readJson(path.join(benchmarkCycleRoot, "state/benchmarks/last-benchmark-cycle-low-risk.json"), null);
 assert.equal(storedCycleReport.suite, "low-risk");
 assert.equal(storedCycleReport.multiCycle.available, true);
 const storedCycleHistory = await fs.readFile(path.join(benchmarkCycleRoot, "state/benchmarks/history-cycle-low-risk.jsonl"), "utf8");
-assert.equal(storedCycleHistory.trim().split("\n").length, 1);
+assert.equal(storedCycleHistory.trim().split("\n").length, 4);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

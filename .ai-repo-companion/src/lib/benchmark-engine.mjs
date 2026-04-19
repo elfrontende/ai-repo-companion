@@ -231,7 +231,11 @@ export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
     summary: cycleReport.summary
   }));
   await trimBenchmarkHistory(cycleHistoryPath, cycleHistoryRetentionEntries);
-  cycleReport.multiCycle = await buildBenchmarkCycleComparison(cycleHistoryPath, cycleTrendWindow);
+  cycleReport.multiCycle = await buildBenchmarkCycleComparison(
+    cycleHistoryPath,
+    cycleTrendWindow,
+    Number(config.tuning?.benchmarkCycleComparisonWindow) || 2
+  );
   await writeJson(cycleReportPath, cycleReport);
   if (suite === "mixed") {
     await writeJson(path.join(rootDir, "state/benchmarks/last-benchmark-cycle.json"), cycleReport);
@@ -699,7 +703,7 @@ function buildBenchmarkCycleRecommendation(outcome, balancedDelta, tuningRunCoun
   return "The benchmark cycle stayed effectively flat. Collect more iterations before changing policy based on cycle data alone.";
 }
 
-async function buildBenchmarkCycleComparison(historyPath, trendWindow) {
+async function buildBenchmarkCycleComparison(historyPath, trendWindow, comparisonWindow) {
   const entries = await readHistoryEntries(historyPath);
   const recentEntries = entries.slice(-Math.max(2, trendWindow));
   const summaries = recentEntries
@@ -743,6 +747,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow) {
     improvedCount: outcomeCounts.improved ?? 0,
     degradedCount: outcomeCounts.degraded ?? 0
   });
+  const windowComparison = buildCycleWindowComparison(entries, comparisonWindow);
 
   return {
     available: true,
@@ -756,6 +761,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow) {
     latestVsPreviousBalancedDelta,
     outcomeCounts,
     trendDirection,
+    windowComparison,
     recommendation: buildCycleTrendRecommendation({
       trendDirection,
       latestOutcome: latest.outcome,
@@ -764,6 +770,57 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow) {
       latestVsPreviousBalancedDelta
     })
   };
+}
+
+function buildCycleWindowComparison(entries, comparisonWindow) {
+  const windowSize = Math.max(1, Number(comparisonWindow) || 2);
+  const requiredEntries = windowSize * 2;
+  if (entries.length < requiredEntries) {
+    return {
+      available: false,
+      reason: "insufficient-cycle-history",
+      requiredEntries,
+      currentEntries: entries.length
+    };
+  }
+
+  const currentWindow = entries.slice(-windowSize);
+  const previousWindow = entries.slice(-(windowSize * 2), -windowSize);
+  const currentAverage = averageCycleOutcomeMetric(currentWindow);
+  const previousAverage = averageCycleOutcomeMetric(previousWindow);
+  const delta = toFixedDelta(currentAverage, previousAverage);
+  const direction = Number.isFinite(delta) && delta >= 1
+    ? "improving"
+    : Number.isFinite(delta) && delta <= -1
+      ? "degrading"
+      : "flat";
+
+  return {
+    available: true,
+    windowSize,
+    currentWindowAverage: currentAverage,
+    previousWindowAverage: previousAverage,
+    delta,
+    direction,
+    recommendation: buildCycleWindowRecommendation(direction, delta, windowSize)
+  };
+}
+
+function averageCycleOutcomeMetric(entries) {
+  return Number((
+    entries.reduce((total, entry) => total + (Number(entry?.summary?.balancedReductionPercentDelta) || 0), 0)
+    / Math.max(1, entries.length)
+  ).toFixed(2));
+}
+
+function buildCycleWindowRecommendation(direction, delta, windowSize) {
+  if (direction === "improving") {
+    return `The last ${windowSize} cycle runs are improving by ${delta.toFixed(2)} balanced points versus the previous window.`;
+  }
+  if (direction === "degrading") {
+    return `The last ${windowSize} cycle runs are degrading by ${Math.abs(delta).toFixed(2)} balanced points versus the previous window.`;
+  }
+  return `The last ${windowSize} cycle runs are effectively flat versus the previous window.`;
 }
 
 function countCycleOutcomeStreak(summaries, outcome) {

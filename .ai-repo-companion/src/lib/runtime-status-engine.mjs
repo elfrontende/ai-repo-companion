@@ -200,6 +200,22 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  if (benchmarkCycleSummary.windowComparison?.available && benchmarkCycleSummary.windowComparison.direction === "degrading") {
+    findings.push({
+      severity: "warning",
+      code: "benchmark-cycle-window-degrading",
+      message: benchmarkCycleSummary.windowComparison.recommendation
+    });
+  }
+
+  if (benchmarkCycleSummary.windowComparison?.available && benchmarkCycleSummary.windowComparison.direction === "improving") {
+    findings.push({
+      severity: "info",
+      code: "benchmark-cycle-window-improving",
+      message: benchmarkCycleSummary.windowComparison.recommendation
+    });
+  }
+
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     queue,
@@ -301,6 +317,7 @@ async function readBenchmarkCycleSummary(rootDir, config = {}) {
     averageRollbackCount: multiCycle.averageRollbackCount ?? null,
     latestVsPreviousBalancedDelta: multiCycle.latestVsPreviousBalancedDelta ?? null,
     outcomeCounts: multiCycle.outcomeCounts ?? {},
+    windowComparison: multiCycle.windowComparison ?? { available: false, reason: "no-window-comparison" },
     recommendation: multiCycle.recommendation ?? benchmarkCycle?.summary?.recommendation ?? null,
     multiCycle
   };
