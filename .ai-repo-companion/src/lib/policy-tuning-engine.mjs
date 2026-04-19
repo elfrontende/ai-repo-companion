@@ -727,7 +727,9 @@ function buildTuningPlan(suggestions) {
       title: step.title,
       suggestionIds: step.suggestions.map((item) => item.id),
       expectedImpact: summarizePlanStepImpact(step.suggestions),
+      deltaBreakdown: summarizePlanStepDeltaBreakdown(step.suggestions),
       expectedImpactSummary: summarizePlanStepText(step.suggestions),
+      confidence: buildPlanPhaseConfidence(step.phase, step.suggestions),
       riskLevel: inferPlanPhaseRisk(step.phase),
       whyThisPhase: explainPlanPhase(step.phase, step.suggestions),
       autoApplicableCount: step.suggestions.filter((item) => item.canAutoApply).length,
@@ -819,6 +821,105 @@ function summarizePlanStepText(suggestions) {
   return "Targets bounded policy changes that should have limited blast radius but still improve operator control.";
 }
 
+function summarizePlanStepDeltaBreakdown(suggestions) {
+  const domainImpacts = suggestions
+    .map((item) => item.expectedImpact)
+    .filter((impact) => impact?.type === "domain-value-gate");
+  const balancedImpacts = suggestions
+    .map((item) => item.expectedImpact)
+    .filter((impact) => impact?.type === "balanced-lane");
+
+  return {
+    domainCount: domainImpacts.length,
+    totalThresholdDelta: domainImpacts.reduce((total, impact) => total + (Number(impact.thresholdDelta) || 0), 0),
+    totalLiveTokensUsed: domainImpacts.reduce((total, impact) => total + (Number(impact.liveTokensUsed) || 0), 0),
+    maxReductionGap: domainImpacts.reduce((max, impact) => Math.max(max, Number(impact.reductionGap) || 0), 0),
+    estimatedTokenDelta: balancedImpacts.reduce((total, impact) => total + (Number(impact.estimatedTokenDelta) || 0), 0),
+    affectedDomainCount: [...new Set(balancedImpacts.flatMap((impact) => impact.affectedDomains ?? []))].length
+  };
+}
+
+function buildPlanPhaseConfidence(phase, suggestions) {
+  const deltaBreakdown = summarizePlanStepDeltaBreakdown(suggestions);
+  let score = 0;
+  const reasons = [];
+
+  if (phase === "cheap-domains") {
+    if (deltaBreakdown.domainCount >= 2) {
+      score += 35;
+      reasons.push("multiple cheap domains agree on the same direction");
+    } else if (deltaBreakdown.domainCount === 1) {
+      score += 20;
+      reasons.push("one cheap domain shows a strong local drift signal");
+    }
+
+    if (deltaBreakdown.totalLiveTokensUsed >= 10000) {
+      score += 30;
+      reasons.push("the phase targets a meaningful amount of live token burn");
+    } else if (deltaBreakdown.totalLiveTokensUsed > 0) {
+      score += 15;
+      reasons.push("the phase targets some measured live token burn");
+    }
+
+    if (deltaBreakdown.maxReductionGap >= 6) {
+      score += 20;
+      reasons.push("the saver-vs-balanced reduction gap is wide");
+    } else if (deltaBreakdown.maxReductionGap >= 4) {
+      score += 10;
+      reasons.push("the saver-vs-balanced reduction gap is usable");
+    }
+
+    if (deltaBreakdown.totalThresholdDelta >= 5) {
+      score += 15;
+      reasons.push("the phase has a concrete local gate delta to apply");
+    }
+  } else if (phase === "balanced-lane") {
+    if (deltaBreakdown.estimatedTokenDelta >= 2000) {
+      score += 45;
+      reasons.push("the balanced lane still carries a large synthetic token gap");
+    } else if (deltaBreakdown.estimatedTokenDelta >= 500) {
+      score += 25;
+      reasons.push("the balanced lane still carries a measurable synthetic token gap");
+    }
+
+    if (deltaBreakdown.affectedDomainCount >= 2) {
+      score += 30;
+      reasons.push("the balanced lane signal spans multiple domains");
+    } else if (deltaBreakdown.affectedDomainCount === 1) {
+      score += 15;
+      reasons.push("the balanced lane signal is visible in at least one domain");
+    }
+
+    if (suggestions.length >= 2) {
+      score += 15;
+      reasons.push("multiple bounded suggestions point at the same lane");
+    }
+  } else {
+    if (suggestions.length >= 2) {
+      score += 35;
+      reasons.push("multiple suggestions support this phase");
+    } else if (suggestions.length === 1) {
+      score += 20;
+      reasons.push("this phase currently relies on a single bounded suggestion");
+    }
+    score += 15;
+    reasons.push("the phase is intentionally bounded even if its signal is weaker");
+  }
+
+  const normalizedScore = Math.max(0, Math.min(100, Math.round(score)));
+  const level = normalizedScore >= 75
+    ? "high"
+    : normalizedScore >= 45
+      ? "medium"
+      : "low";
+
+  return {
+    score: normalizedScore,
+    level,
+    reasons
+  };
+}
+
 function inferSuggestionRisk(suggestion) {
   const effectType = suggestion.expectedImpact?.type ?? "other";
   if (effectType === "domain-value-gate") {
@@ -862,6 +963,8 @@ function buildTuningWorkflow(tuningPlan, selectedPhase) {
     phase: step.phase,
     title: step.title,
     riskLevel: step.riskLevel,
+    confidence: step.confidence,
+    deltaBreakdown: step.deltaBreakdown,
     expectedImpactSummary: step.expectedImpactSummary,
     whyThisPhase: step.whyThisPhase,
     commands: {

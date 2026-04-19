@@ -161,8 +161,10 @@ function buildPhasePreview(step) {
     phase: step.phase,
     title: step.title,
     riskLevel: step.riskLevel,
+    confidence: buildConfidenceCard(step.confidence),
     whyThisPhase: step.whyThisPhase,
     expectedImpactSummary: step.expectedImpactSummary,
+    deltaBreakdown: step.deltaBreakdown,
     deltaHint: summarizePhaseDeltaHint(step.expectedImpact)
   };
 }
@@ -171,9 +173,11 @@ function buildPhaseEvidenceCard(step) {
   return {
     phase: step.phase,
     riskLevel: step.riskLevel,
+    confidence: buildConfidenceCard(step.confidence),
     applyableCount: step.applyableCount,
     autoApplicableCount: step.autoApplicableCount,
     expectedImpactSummary: step.expectedImpactSummary,
+    deltaBreakdown: step.deltaBreakdown,
     deltaHint: summarizePhaseDeltaHint(step.expectedImpact),
     whyThisPhase: step.whyThisPhase
   };
