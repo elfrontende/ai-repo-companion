@@ -1172,25 +1172,33 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
         cheapestVariantStreak: {
           variant: "saver",
           count: 3
-        }
+        },
+        changeCount: 0,
+        isNoisy: false
       },
       deploy: {
         cheapestVariantStreak: {
           variant: "saver",
           count: 1
-        }
+        },
+        changeCount: 0,
+        isNoisy: false
       },
       ui: {
         cheapestVariantStreak: {
           variant: "balanced",
           count: 2
-        }
+        },
+        changeCount: 2,
+        isNoisy: true
       },
       testing: {
         cheapestVariantStreak: {
           variant: "saver",
           count: 1
-        }
+        },
+        changeCount: 1,
+        isNoisy: false
       }
     }
   },
@@ -1240,6 +1248,7 @@ assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].domain, "docs")
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].shouldTightenValueGate, true);
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].liveTokensUsed, 12000);
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].saverTrendStreak, 3);
+assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics.find((item) => item.domain === "ui").isNoisy, true);
 assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
 assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
 assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].domain, "docs");
@@ -1255,6 +1264,7 @@ assert.ok(runtimeDoctor.findings.some((item) => item.code === "balanced-lane-hea
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "auto-tune-stale"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate-drift-docs"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "post-tune-benchmark-improved"));
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-signal-noisy-ui"));
 assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune --auto");
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
@@ -1370,6 +1380,7 @@ assert.equal(benchmarkReport.trend.cheapestVariantStreak.count, 3);
 assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.variant, "saver");
 assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.count, 3);
 assert.ok(typeof benchmarkReport.trend.byDomain.deploy.deltaByVariant.saver.totalTokensDelta === "number");
+assert.equal(typeof benchmarkReport.trend.byDomain.ui.isNoisy, "boolean");
 assert.match(benchmarkReport.trend.recommendation, /Saver has been the cheapest variant/i);
 assert.equal(benchmarkReport.tuningComparison.available, true);
 assert.equal(benchmarkReport.tuningComparison.outcome, "improved");

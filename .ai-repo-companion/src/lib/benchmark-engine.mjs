@@ -425,6 +425,9 @@ function buildDomainTrend(entries) {
         {
           latestCheapestVariant: latestVariant,
           cheapestVariantStreak: countDomainCheapestVariantStreak(recentEntries, domain),
+          recentCheapestVariants: recentEntries.map((entry) => entry?.aggregate?.byDomain?.[domain]?.cheapestVariant ?? null),
+          changeCount: countDomainVariantChanges(recentEntries, domain),
+          isNoisy: countDomainVariantChanges(recentEntries, domain) >= 2,
           deltaByVariant: buildVariantDelta(
             previousByDomain?.[domain]?.byVariant,
             latestByDomain?.[domain]?.byVariant
@@ -454,6 +457,22 @@ function countDomainCheapestVariantStreak(entries, domain) {
     variant: latestVariant,
     count
   };
+}
+
+function countDomainVariantChanges(entries, domain) {
+  let changes = 0;
+  let previousVariant = null;
+  for (const entry of entries) {
+    const currentVariant = entry?.aggregate?.byDomain?.[domain]?.cheapestVariant ?? null;
+    if (!currentVariant) {
+      continue;
+    }
+    if (previousVariant && previousVariant !== currentVariant) {
+      changes += 1;
+    }
+    previousVariant = currentVariant;
+  }
+  return changes;
 }
 
 function aggregateBenchmarkByDomain(taskResults) {

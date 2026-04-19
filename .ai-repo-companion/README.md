@@ -207,6 +207,7 @@ Daily ergonomics are better now too:
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
 - `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `doctor` also warns when a cheap domain like `docs` or `deploy` keeps favoring `saver` but its `minScoreByDomain` threshold is still too loose
+- `doctor` now also flags noisy domains whose cheapest variant flips too often, so auto-tune waits for steadier benchmark evidence
 - `doctor` now also returns `recommendedActions`, so the diagnostics come with a small operator playbook instead of only raw findings
 - `--costMode saver|balanced|strict` lets one live run be cheaper or stricter without editing `system.json`
 - `--reviewProfile light|auto|heavy` lets one live run force a lighter or heavier review profile
