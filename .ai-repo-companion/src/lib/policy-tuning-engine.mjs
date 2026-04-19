@@ -138,7 +138,8 @@ export async function runAutoPolicyTuning(rootDir, options = {}) {
       path: suggestion.path,
       previousValue: suggestion.currentValue,
       proposedValue: suggestion.proposedValue,
-      priority: suggestion.priority ?? 0
+      priority: suggestion.priority ?? 0,
+      phase: findSuggestionPhase(analysis.tuningPlan, suggestion.id)
     });
     state.lastAppliedById ??= {};
     state.lastAppliedById[suggestion.id] = now;
@@ -212,6 +213,7 @@ export async function reconcileAutoPolicyTuning(rootDir, options = {}) {
     lastAppliedById: {}
   });
   const now = new Date().toISOString();
+  const selectedPhase = options.phase ?? null;
 
   if (tuningConfig.autoRollbackEnabled === false) {
     return {
@@ -278,7 +280,11 @@ export async function reconcileAutoPolicyTuning(rootDir, options = {}) {
     };
   }
 
-  const rollbackPlan = Array.isArray(canary.rollbackPlan) ? [...canary.rollbackPlan].reverse() : [];
+  const fullRollbackPlan = Array.isArray(canary.rollbackPlan) ? [...canary.rollbackPlan] : [];
+  const rollbackPlan = fullRollbackPlan
+    .filter((change) => !selectedPhase || change.phase === selectedPhase)
+    .reverse();
+  const remainingRollbackPlan = fullRollbackPlan.filter((change) => selectedPhase && change.phase !== selectedPhase);
   const rolledBack = [];
   for (const change of rollbackPlan) {
     applyConfigPatch(config, change.path, change.previousValue);
@@ -296,11 +302,14 @@ export async function reconcileAutoPolicyTuning(rootDir, options = {}) {
   await writeJson(statePath, state);
   lastTuning.canary = {
     ...canary,
-    status: "rolled-back",
+    status: remainingRollbackPlan.length > 0 ? "pending" : "rolled-back",
+    rollbackPlan: remainingRollbackPlan,
     reconciledAt: now,
     reconciliation: {
       benchmarkGeneratedAt,
-      reasons: evaluation.reasons
+      reasons: evaluation.reasons,
+      selectedPhase,
+      remainingRollbackCount: remainingRollbackPlan.length
     }
   };
   await writeJson(lastTuningPath, lastTuning);
@@ -315,8 +324,10 @@ export async function reconcileAutoPolicyTuning(rootDir, options = {}) {
   return {
     mode: "reconcile",
     enabled: true,
+    selectedPhase,
     accepted: false,
     rolledBack,
+    remainingRollbackCount: remainingRollbackPlan.length,
     reasons: evaluation.reasons
   };
 }
@@ -742,6 +753,10 @@ function explainPlanPhase(phase, suggestions) {
     return "Manual checkpoint changes come last because they alter operator workflow rather than the cheapest runtime lane.";
   }
   return "This phase contains bounded follow-up tuning work.";
+}
+
+function findSuggestionPhase(tuningPlan, suggestionId) {
+  return tuningPlan?.steps?.find((step) => step.suggestionIds.includes(suggestionId))?.phase ?? null;
 }
 
 function filterSuggestionsByPhase(suggestions, tuningPlan, selectedPhase) {
