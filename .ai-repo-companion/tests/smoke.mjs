@@ -42,6 +42,11 @@ import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
 
+// This file is intentionally broad instead of split into dozens of tiny test
+// files. The project behaves like one integrated runtime, so the smoke suite
+// focuses on "can the main loops still work together?" rather than only
+// micro-testing isolated helpers.
+
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
 await fs.cp(path.resolve("notes"), path.join(tempRoot, "notes"), { recursive: true });

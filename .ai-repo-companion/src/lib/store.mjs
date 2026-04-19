@@ -9,6 +9,8 @@ export async function ensureDir(dirPath) {
 }
 
 export async function ensureFile(filePath, initialContent = "") {
+  // Rerunning bootstrap must be safe, so this helper only creates missing
+  // files and never overwrites user/project state.
   try {
     await fs.access(filePath);
   } catch {
@@ -22,6 +24,8 @@ export async function readJson(filePath, fallback = null) {
     const raw = await fs.readFile(filePath, "utf8");
     return JSON.parse(raw);
   } catch (error) {
+    // Missing files are treated as "not initialized yet" so callers can stay
+    // focused on business rules instead of repeated first-run checks.
     if (error.code === "ENOENT") {
       return fallback;
     }
@@ -35,6 +39,8 @@ export async function writeJson(filePath, value) {
 }
 
 export async function appendLine(filePath, line) {
+  // Append-only files make event history easy to inspect with plain shell
+  // tools, which is helpful when debugging local runtime behavior.
   await ensureDir(path.dirname(filePath));
   await fs.appendFile(filePath, `${line}\n`, "utf8");
 }

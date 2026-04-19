@@ -10,6 +10,8 @@ import { rebuildLinks } from "./memory-engine.mjs";
 // free-form writes from the model into our memory files.
 
 export async function applyReviewOperations(rootDir, operations, options = {}) {
+  // The operation vocabulary stays intentionally tiny. A small local apply
+  // surface is easier to audit, test, and keep deterministic over time.
   const notes = await loadNotes(rootDir);
   const noteById = new Map(notes.map((note) => [note.id, note]));
   const applied = [];

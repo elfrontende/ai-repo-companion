@@ -2,6 +2,29 @@
 
 `AI Repo Companion` is a local-only hidden workspace that can be dropped into any repository and ignored with one entry in the host project's `.gitignore`.
 
+## Documentation map
+
+Start here if you want the short version:
+
+- `README.md` - quick project overview and command list
+- `docs/USER-GUIDE.md` - plain-language guide for everyday use, setup, and config
+- `docs/ONBOARDING.md` - 10-minute checklist for a new maintainer
+- `docs/MAINTENANCE-CHECKLIST.md` - recurring checks to keep the runtime healthy
+- `docs/DEVELOPER-GUIDE.md` - architecture, file map, maintenance workflow, and test strategy
+
+## Which doc should I read?
+
+- I just want to understand what this project does:
+  - read `README.md`
+- I want to use it in my own repository:
+  - read `docs/USER-GUIDE.md`
+- I am a new maintainer and need the fastest way in:
+  - read `docs/ONBOARDING.md`
+- I need the architecture, runtime flows, and test model:
+  - read `docs/DEVELOPER-GUIDE.md`
+- I only want to check whether the system is still healthy:
+  - read `docs/MAINTENANCE-CHECKLIST.md`
+
 ## Goals
 
 - keep AI-specific state outside the main repository surface

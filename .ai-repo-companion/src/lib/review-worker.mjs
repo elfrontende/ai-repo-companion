@@ -41,6 +41,10 @@ export async function inspectReviewQueue(rootDir) {
 }
 
 export async function processReviewQueue(rootDir, config, options = {}) {
+  // This is the heart of the guarded review pipeline.
+  // It is long because it coordinates many small protections in order:
+  // lock -> recovery -> stale handling -> value gate -> provider ->
+  // normalization -> quality -> idempotency -> ranking -> approval/apply.
   const runtimeLock = await acquireReviewLock(rootDir, config.reviewExecution?.runtimeLock ?? {});
   if (!runtimeLock.acquired) {
     return {
@@ -626,6 +630,9 @@ async function maybeApplyReviewOperations(rootDir, execution, config, timestamp)
 }
 
 export async function planReviewNoteChanges(rootDir, execution, config, job = { mode: "unknown", domains: [] }) {
+  // Local note planning keeps the provider output on a leash.
+  // The model may propose many operations, but only the operations that
+  // survive every local guard become eligible for note writes.
   const operations = execution.output?.parsed?.operations;
   if (!Array.isArray(operations) || operations.length === 0) {
     return {

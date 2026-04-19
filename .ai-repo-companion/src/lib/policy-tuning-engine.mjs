@@ -8,6 +8,8 @@ import { appendLine, readJson, writeJson } from "./store.mjs";
 // the system with data instead of rewriting policy by gut feel.
 
 export async function analyzePolicyTuning(rootDir, options = {}) {
+  // Analysis is read-only. It turns raw runtime evidence into bounded tuning
+  // suggestions without mutating config.
   const configPath = path.join(rootDir, "config/system.json");
   const benchmarkPath = path.join(rootDir, "state/benchmarks/last-benchmark.json");
   const config = await readJson(configPath, {});
@@ -46,6 +48,8 @@ export async function analyzePolicyTuning(rootDir, options = {}) {
 }
 
 export async function applyPolicyTuning(rootDir, options = {}) {
+  // Manual apply is intentionally boring: apply only suggestions already
+  // produced by analysis, and only along allowlisted config paths.
   const analysis = await analyzePolicyTuning(rootDir, options);
   const config = await readJson(analysis.configPath, {});
   const applied = [];
@@ -74,6 +78,9 @@ export async function applyPolicyTuning(rootDir, options = {}) {
 }
 
 export async function runAutoPolicyTuning(rootDir, options = {}) {
+  // Auto-tune is still bounded and conservative.
+  // It only applies a small number of pre-approved suggestions per run,
+  // records a canary, and expects a later reconcile step to judge the result.
   const reconciliation = await reconcileAutoPolicyTuning(rootDir, { silentNoop: true });
   const analysis = await analyzePolicyTuning(rootDir, { phase: options.phase ?? null });
   const config = await readJson(analysis.configPath, {});
@@ -205,6 +212,9 @@ export async function runAutoPolicyTuning(rootDir, options = {}) {
 }
 
 export async function reconcileAutoPolicyTuning(rootDir, options = {}) {
+  // Reconcile is the "did our last auto-tune actually help?" step.
+  // It looks at a newer benchmark than the one the canary was created from
+  // and decides whether to accept or roll back the previous auto-change set.
   const configPath = path.join(rootDir, "config/system.json");
   const lastTuningPath = path.join(rootDir, "state/tuning/last-tuning.json");
   const historyPath = path.join(rootDir, "state/tuning/history.jsonl");

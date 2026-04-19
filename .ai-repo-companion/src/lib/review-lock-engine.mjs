@@ -65,6 +65,8 @@ export async function acquireReviewLock(rootDir, config = {}) {
 }
 
 export async function releaseReviewLock(rootDir, lock) {
+  // Release is best-effort. The critical safety rule is to never delete a lock
+  // that now belongs to a different worker.
   if (!lock?.acquired || !lock.lockPath) {
     return {
       released: false,

@@ -11,6 +11,8 @@ export async function loadRegistry(rootDir) {
 }
 
 export async function planAgents(rootDir, taskProfile, systemConfig) {
+  // Agent planning is deterministic on purpose. The same task shape should not
+  // randomly produce a different cast of agents from one run to the next.
   const registry = await loadRegistry(rootDir);
   const dynamicAgents = await ensureDynamicAgents(rootDir, registry, taskProfile, systemConfig);
   const updatedRegistry = dynamicAgents.updatedRegistry;

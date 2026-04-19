@@ -9,6 +9,8 @@ import { loadNotes } from "./context-engine.mjs";
 // acceptable operation blindly.
 
 export async function rankReviewOperations(rootDir, operations, config = {}) {
+  // Ranking turns "safe enough" into "worth applying under a limited budget".
+  // This is where valid-but-low-value changes get pushed out of the way.
   const notes = await loadNotes(rootDir);
   const noteById = new Map(notes.map((note) => [note.id, note]));
   const rankingConfig = {

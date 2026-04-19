@@ -13,6 +13,8 @@ import { recordReviewMetricsEvent } from "./review-metrics-engine.mjs";
 // person says "yes, apply these changes".
 
 export function assessReviewApprovalRequirement(job, config = {}) {
+  // This function only decides whether a human checkpoint is required.
+  // It keeps side effects out of the policy decision so tests stay simple.
   const policy = normalizeApprovalConfig(config);
   if (!policy.enabled) {
     return {
@@ -40,6 +42,8 @@ export function assessReviewApprovalRequirement(job, config = {}) {
 }
 
 export async function createApprovalRequest(rootDir, job, reportPath, notePlan, decision) {
+  // The approval file freezes the selected operations so later approval does
+  // not depend on rerunning the provider and getting a different answer.
   const approvalPath = path.join(rootDir, "state/reviews/approvals", `${job.id}.json`);
   const createdAt = new Date().toISOString();
   const request = {
@@ -61,6 +65,8 @@ export async function createApprovalRequest(rootDir, job, reportPath, notePlan, 
 }
 
 export async function applyApprovalExpiryPolicy(rootDir, queue, historyPath, config = {}) {
+  // Approvals should not wait forever because the repo context can drift while
+  // a pending decision sits untouched.
   const policy = normalizeApprovalConfig(config);
   if (!policy.enabled || policy.pendingApprovalTtlMinutes <= 0) {
     return {
@@ -182,6 +188,8 @@ export async function applyApprovalExpiryPolicy(rootDir, queue, historyPath, con
 }
 
 export async function approveReviewJob(rootDir, jobId, config = {}) {
+  // Manual approval reuses the same recovery-safe apply path as the worker so
+  // "auto apply" and "approved apply" behave the same way.
   const queuePath = path.join(rootDir, "state/memory/review-queue.json");
   const historyPath = path.join(rootDir, "state/reviews/history.jsonl");
   const approvalPath = path.join(rootDir, "state/reviews/approvals", `${jobId}.json`);

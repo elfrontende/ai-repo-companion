@@ -11,6 +11,8 @@ export async function getReviewMetrics(rootDir) {
 }
 
 export async function recordReviewMetricsEvent(rootDir, event = {}) {
+  // Metrics are updated from small local events instead of background agents.
+  // That keeps cost accounting transparent and easy to debug.
   const metrics = await getReviewMetrics(rootDir);
   const next = {
     ...metrics,

@@ -15,6 +15,8 @@ export async function runReviewWorker(rootDir, config, options = {}) {
 }
 
 export async function runOnce(rootDir, config, options = {}) {
+  // Worker-state breadcrumbs are mainly for humans. They answer simple
+  // operator questions like "did the worker actually run?".
   const startedAt = new Date().toISOString();
   await updateWorkerState(rootDir, {
     status: "running",

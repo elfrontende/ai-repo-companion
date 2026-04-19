@@ -3,6 +3,10 @@ import path from "node:path";
 import { listFiles } from "./store.mjs";
 import { estimateTokens, parseFrontmatter, roughTokenMatch, tokenize } from "./note-parser.mjs";
 
+// Context assembly is the cheapest big win in the whole project.
+// Instead of sending "everything we know" to the model, we rank notes and
+// stop once we have the smallest note bundle that still looks useful.
+
 export async function loadNotes(rootDir) {
   const notesDir = path.join(rootDir, "notes");
   const files = await listFiles(notesDir, ".md");
@@ -25,6 +29,10 @@ export async function loadNotes(rootDir) {
 }
 
 export function assembleContext(task, notes, options = {}) {
+  // The bundler is intentionally simple:
+  // 1. score all notes against the task
+  // 2. sort strongest first
+  // 3. stop at note count or token budget
   const tokenBudget = options.tokenBudget ?? 1200;
   const maxNotes = options.maxNotes ?? 6;
   const taskTokens = tokenize(task);
@@ -70,6 +78,9 @@ export function assembleContext(task, notes, options = {}) {
 }
 
 function scoreNote(note, taskTokens, noteById) {
+  // We bias toward structured signals before body text:
+  // tags > title > tags tokenized again > body > linked neighbors.
+  // This keeps retrieval stable even when note bodies grow over time.
   const titleTokens = tokenize(note.title ?? "");
   const bodyTokens = tokenize(note.body ?? "");
   const tagTokens = note.tags.flatMap((tag) => tokenize(tag));

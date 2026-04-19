@@ -79,6 +79,8 @@ export async function evaluateMemoryPolicy(rootDir, taskProfile, config) {
 }
 
 export async function applyMemoryPolicyOutcome(rootDir, decision, taskProfile, syncResult, config = {}) {
+  // This is where a policy decision becomes real local state: counters move,
+  // and maybe a new review job lands in the queue.
   const policyStatePath = path.join(rootDir, "state/memory/policy-state.json");
   const queuePath = path.join(rootDir, "state/memory/review-queue.json");
   const policyState = await readJson(policyStatePath, defaultPolicyState());

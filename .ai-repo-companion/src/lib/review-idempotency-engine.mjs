@@ -12,6 +12,8 @@ import { roughTokenMatch, slugify, tokenize } from "./note-parser.mjs";
 // - fall back to hard rejection only when the config says so
 
 export async function applyIdempotencyGuard(rootDir, operations, config = {}) {
+  // Duplicate pressure mostly comes from create_note, so that is where we are
+  // intentionally strict. Existing-note updates can stay for later guards.
   const notes = await loadNotes(rootDir);
   const noteIds = new Set(notes.map((note) => note.id));
   const guardConfig = {
