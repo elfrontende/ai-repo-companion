@@ -1475,6 +1475,17 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark-cycle.jso
       },
       spread: 0.75
     },
+    windowHistorySummary: {
+      available: true,
+      count: 2,
+      counts: {
+        improving: 2
+      },
+      dominantDirection: "improving",
+      averageDelta: 2.63,
+      volatility: 2.63,
+      summary: "Recent window comparisons skew improving (2 improving vs 0 degrading) with an average delta of 2.63."
+    },
     confidence: {
       score: 90,
       level: "high",
@@ -1531,6 +1542,9 @@ assert.ok(runtimeStatus.benchmarkCycleSummary.multiCycle.windowHistory.items.len
 assert.equal(runtimeStatus.benchmarkCycleSummary.multiCycle.stableWindowDirection, "improving");
 assert.equal(runtimeStatus.benchmarkCycleSummary.multiCycle.recentWindowExtremes.available, true);
 assert.equal(runtimeStatus.benchmarkCycleSummary.multiCycle.recentWindowExtremes.best.direction, "improving");
+assert.equal(runtimeStatus.benchmarkCycleSummary.windowHistorySummary.available, true);
+assert.equal(runtimeStatus.benchmarkCycleSummary.windowHistorySummary.dominantDirection, "improving");
+assert.match(runtimeStatus.benchmarkCycleSummary.windowHistorySummary.summary, /improving|window comparisons/i);
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
@@ -1600,6 +1614,8 @@ assert.equal(runtimeReport.evidence.longRun.stableWindowDirection, "improving");
 assert.ok(runtimeReport.evidence.longRun.windowHistory.items.length >= 1);
 assert.equal(runtimeReport.evidence.longRun.recentWindowExtremes.available, true);
 assert.equal(runtimeReport.evidence.longRun.recentWindowExtremes.best.direction, "improving");
+assert.equal(runtimeReport.evidence.longRun.windowHistorySummary.available, true);
+assert.equal(runtimeReport.evidence.longRun.windowHistorySummary.dominantDirection, "improving");
 assert.equal(runtimeReport.evidence.longRun.confidence.level, "high");
 assert.match(runtimeReport.evidence.longRun.summary, /Long-run cycle evidence is high confidence and improving/i);
 assert.match(runtimeReport.evidence.longRun.summary, /window comparison|window comparisons/i);
@@ -1795,6 +1811,8 @@ assert.equal(benchmarkCycle.multiCycle.windowComparison.available, true);
 assert.equal(benchmarkCycle.multiCycle.windowHistory.available, true);
 assert.ok(benchmarkCycle.multiCycle.windowHistory.items.length >= 1);
 assert.equal(benchmarkCycle.multiCycle.recentWindowExtremes.available, true);
+assert.equal(benchmarkCycle.multiCycle.windowHistorySummary.available, true);
+assert.ok(["improving", "degrading", "flat"].includes(benchmarkCycle.multiCycle.windowHistorySummary.dominantDirection));
 assert.ok(["improving", "degrading", "flat"].includes(benchmarkCycle.multiCycle.windowComparison.direction));
 assert.ok(["low", "medium", "high"].includes(benchmarkCycle.multiCycle.confidence.level));
 const storedCycleReport = await readJson(path.join(benchmarkCycleRoot, "state/benchmarks/last-benchmark-cycle-low-risk.json"), null);

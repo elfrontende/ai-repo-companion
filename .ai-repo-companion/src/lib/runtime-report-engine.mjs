@@ -146,6 +146,7 @@ function buildEvidence(status, doctor, tuning) {
       averageBalancedDelta: status.benchmarkCycleSummary.averageBalancedDelta,
       averageRollbackCount: status.benchmarkCycleSummary.averageRollbackCount,
       stableWindowDirection: multiCycle.stableWindowDirection ?? null,
+      windowHistorySummary: multiCycle.windowHistorySummary ?? { available: false, reason: "no-window-history" },
       windowComparison: {
         direction: cycleWindow.direction ?? null,
         delta: cycleWindow.delta ?? null,
