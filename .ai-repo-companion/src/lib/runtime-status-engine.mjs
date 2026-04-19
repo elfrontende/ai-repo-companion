@@ -10,6 +10,8 @@ import { readJson } from "./store.mjs";
 // internals that a repo owner would have to mentally reconstruct.
 
 export async function getRuntimeStatus(rootDir, config = {}) {
+  // Status is the structured fact layer. Other commands can safely build more
+  // opinionated summaries on top without re-reading raw state files.
   const queue = await inspectReviewQueue(rootDir);
   const metrics = await summarizeReviewMetrics(rootDir);
   const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
@@ -31,6 +33,8 @@ export async function getRuntimeStatus(rootDir, config = {}) {
 }
 
 export async function runRuntimeDoctor(rootDir, config = {}) {
+  // Doctor is the opinionated layer over status. It converts raw runtime facts
+  // into findings and concrete next actions for a repo owner.
   const queue = await inspectReviewQueue(rootDir);
   const worker = await getWorkerState(rootDir);
   const recovery = await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null);

@@ -43,6 +43,8 @@ export async function ensureWorkspace(rootDir) {
     await ensureDir(path.join(rootDir, relativeDir));
   }
 
+  // Seed files are the stable minimum contract for a workspace. Tests and
+  // CLI commands can assume these paths exist, even when they start empty.
   for (const relativeFile of seedFiles) {
     const sourcePath = path.join(rootDir, relativeFile);
     const content = await fs.readFile(sourcePath, "utf8").catch(() => null);

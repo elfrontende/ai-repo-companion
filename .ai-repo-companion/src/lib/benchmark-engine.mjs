@@ -7,6 +7,13 @@ import { appendLine, readJson, writeJson } from "./store.mjs";
 import { applyReviewCostMode } from "./review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "./review-value-gate-engine.mjs";
 
+// Benchmarks are the project's local evidence loop.
+// They are not meant to imitate every real repository perfectly.
+// They exist to answer a narrower question:
+// "Is the current policy getting cheaper or noisier over time?"
+
+// Each suite stresses a different part of the runtime so we can compare
+// cheap-domain behavior with higher-risk work without mixing their signals.
 const benchmarkSuites = {
   mixed: [
     {
@@ -95,6 +102,8 @@ const benchmarkVariants = [
 ];
 
 export async function runSyntheticBenchmark(rootDir, config, options = {}) {
+  // A single benchmark pass compares the same tasks across several runtime
+  // profiles plus a naive baseline that drags in the full note set.
   const suite = resolveBenchmarkSuite(options.suite);
   const suiteTasks = benchmarkSuites[suite];
   const notes = augmentWithNoiseNotes(await loadNotes(rootDir));
@@ -172,6 +181,9 @@ export async function runSyntheticBenchmark(rootDir, config, options = {}) {
 }
 
 export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
+  // A cycle is just "benchmark several times in a row".
+  // Optional auto-tune between runs lets us test whether bounded tuning helps
+  // economics over a short controlled window instead of only one snapshot.
   const iterations = Math.max(1, Number(options.iterations) || 3);
   const autoTuneBetweenRuns = options.autoTuneBetweenRuns === true;
   const suite = resolveBenchmarkSuite(options.suite);

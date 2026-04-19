@@ -6,6 +6,8 @@ import { roughTokenMatch, slugify, tokenize } from "./note-parser.mjs";
 // ids before quality checks and file writes happen.
 
 export async function normalizeReviewOperations(rootDir, operations) {
+  // Models often know note titles better than stable ids. Normalization turns
+  // those fuzzy references into graph-safe ids before stricter gates run.
   const notes = await loadNotes(rootDir);
   const resolvers = buildResolvers(notes);
   const normalized = [];

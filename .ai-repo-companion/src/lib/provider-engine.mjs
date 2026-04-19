@@ -32,6 +32,8 @@ export async function executeReviewPayload(rootDir, payload, config) {
 }
 
 function pickProvider(mode, executionConfig) {
+  // Provider choice is lane-aware: balanced work prefers lighter routes,
+  // while expensive work stays on the stricter Codex-first path.
   const configuredProvider = executionConfig.providerByMode?.[mode] ?? "claude";
 
   // Balanced work should prefer Cursor when it is available because that lane
@@ -311,6 +313,8 @@ async function executeNativeCursorAdapter(rootDir, payload, nativeCursor, review
 }
 
 async function executeCommandAdapter(rootDir, provider, payload, commandConfig) {
+  // Command adapters are the generic escape hatch for external CLIs or custom
+  // wrappers. Their output still goes through the same local safety pipeline.
   if (!commandConfig?.command) {
     throw new Error(`Command adapter for provider "${provider}" is enabled but has no command.`);
   }

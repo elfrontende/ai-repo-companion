@@ -1,3 +1,7 @@
+// Note parsing stays intentionally tiny and permissive.
+// The workspace only needs lightweight frontmatter support and cheap token
+// heuristics, not a full Markdown or YAML parser dependency.
+
 export function parseFrontmatter(markdown) {
   const trimmed = markdown.trimStart();
   if (!trimmed.startsWith("---\n")) {
@@ -53,6 +57,8 @@ export function formatFrontmatter(meta, body) {
 }
 
 export function estimateTokens(text) {
+  // A rough 4-chars-per-token estimate is "good enough" for retrieval
+  // budgeting and keeps the runtime dependency-free.
   return Math.max(1, Math.ceil(text.trim().length / 4));
 }
 
@@ -65,6 +71,9 @@ export function slugify(value) {
 }
 
 export function tokenize(text) {
+  // We keep tokenization language-light on purpose.
+  // It only needs to support fuzzy routing and retrieval for short prompts,
+  // mostly in English and Ukrainian.
   return [...new Set(
     text
       .toLowerCase()
@@ -75,6 +84,8 @@ export function tokenize(text) {
 }
 
 export function roughTokenMatch(left, right) {
+  // This matcher is intentionally fuzzy so notes can still match when the
+  // wording changes a little between tasks, tags, and titles.
   if (!left || !right) {
     return false;
   }

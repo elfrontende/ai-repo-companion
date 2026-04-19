@@ -10,6 +10,8 @@ import { loadNotes } from "./context-engine.mjs";
 // changes that are strong enough to be worth saving as durable memory.
 
 export async function evaluateReviewOperations(rootDir, operations) {
+  // Durable memory should be a little picky. Rejecting weak writes now is
+  // cheaper than dragging noisy notes through future prompts.
   const notes = await loadNotes(rootDir);
   const noteIds = new Set(notes.map((note) => note.id));
   const accepted = [];

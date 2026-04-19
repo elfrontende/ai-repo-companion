@@ -24,6 +24,8 @@ export async function buildRuntimeReport(rootDir, config = {}) {
 }
 
 export async function writeRuntimeReportHtml(rootDir, config = {}, outputPath) {
+  // This writes a static snapshot, not a live dashboard. The goal is easy
+  // sharing and archiving, not another always-on service to maintain.
   const report = await buildRuntimeReport(rootDir, config);
   const finalOutputPath = outputPath || path.join(rootDir, "state/reports/runtime-report.html");
   await fs.mkdir(path.dirname(finalOutputPath), { recursive: true });

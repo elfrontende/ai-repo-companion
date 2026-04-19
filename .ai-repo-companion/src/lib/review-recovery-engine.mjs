@@ -12,6 +12,8 @@ import { recordReviewMetricsEvent } from "./review-metrics-engine.mjs";
 // restore the notes directory from backup and put the job back into the queue.
 
 export async function beginReviewApplyRecovery(rootDir, job, reportPath, config = {}) {
+  // A plain folder backup is boring on purpose. During recovery, boring is
+  // better than clever because it is easier to trust and inspect.
   const recoveryConfig = normalizeRecoveryConfig(config);
   if (!recoveryConfig.enabled) {
     return null;
@@ -65,6 +67,8 @@ export async function completeReviewApplyRecovery(rootDir, session, config = {})
 }
 
 export async function recoverInterruptedReviewRun(rootDir, config = {}) {
+  // Recovery should be idempotent: seeing the same interrupted state twice
+  // must converge to the same safe "rolled back and re-queued" outcome.
   const recoveryConfig = normalizeRecoveryConfig(config);
   if (!recoveryConfig.enabled) {
     return {

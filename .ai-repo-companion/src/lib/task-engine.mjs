@@ -39,6 +39,8 @@ export function classifyTask(task) {
   const effort = complexity >= 8 || risk === "high" ? "high" : complexity >= 4 ? "medium" : "low";
 
   return {
+    // This compact profile is shared by routing, policy, retrieval, and
+    // benchmarking, so keeping its shape stable makes the whole runtime saner.
     task,
     tokens,
     intents: intents.length ? intents : ["implementation"],

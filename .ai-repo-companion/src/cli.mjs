@@ -17,6 +17,10 @@ import { buildRuntimeReport, writeRuntimeReportHtml } from "./lib/runtime-report
 import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "./lib/benchmark-engine.mjs";
 import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
 
+// The CLI is intentionally thin.
+// It is mostly argument parsing plus command routing into the lib/ modules.
+// That keeps the interesting behavior testable without needing to shell out.
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const defaultRoot = path.resolve(__dirname, "..");
@@ -321,6 +325,8 @@ async function runDemo(args) {
 }
 
 function parseArgs(argv) {
+  // This parser is deliberately minimal because the project only needs
+  // flat `--flag value` pairs for local operator commands.
   const parsed = {};
   for (let index = 0; index < argv.length; index += 1) {
     const current = argv[index];
@@ -449,6 +455,9 @@ function buildRuntimeReviewConfig(baseConfig, args) {
 }
 
 function describeRuntimeReviewConfig(config) {
+  // This is only for visibility in CLI output.
+  // It helps operators confirm which effective runtime overrides were used
+  // without digging through the merged config by hand.
   return {
     runtimeCostControls: config.runtimeCostControls ?? {
       costMode: "balanced",
