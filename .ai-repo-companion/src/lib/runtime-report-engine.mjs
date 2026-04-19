@@ -54,6 +54,8 @@ function buildOverview(status) {
 function buildEconomics(status) {
   return {
     whyExpensive: status.compactSummary.whyExpensive,
+    whySkipped: status.compactSummary.whySkipped,
+    whyLiveReview: status.compactSummary.whyLiveReview,
     whyConfident: status.compactSummary.whyConfident,
     topWasteDomains: status.benchmarkSummary.topWasteDomains.map((item) => ({
       domain: item.domain,
@@ -355,6 +357,14 @@ function renderRuntimeReportHtml(report) {
         <article class="card">
           <div class="eyebrow">Why Expensive</div>
           <div>${escapeHtml(report.economics.whyExpensive)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Why Skipped</div>
+          <div>${escapeHtml(report.economics.whySkipped)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Why Live Review</div>
+          <div>${escapeHtml(report.economics.whyLiveReview)}</div>
         </article>
         <article class="card">
           <div class="eyebrow">Why Confident</div>

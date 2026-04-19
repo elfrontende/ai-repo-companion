@@ -1233,10 +1233,10 @@ await writeJson(path.join(statusRoot, "state/reviews/metrics.json"), {
   schemaVersion: 1,
   updatedAt: "2026-04-18T05:05:00.000Z",
   counters: {
-    processedJobs: 2,
+    processedJobs: 3,
     completedJobs: 2,
     failedJobs: 0,
-    skippedJobs: 0,
+    skippedJobs: 1,
     awaitingApprovalJobs: 0,
     approvalsApplied: 0,
     approvalsExpiredRequeued: 0,
@@ -1252,13 +1252,15 @@ await writeJson(path.join(statusRoot, "state/reviews/metrics.json"), {
     queueMinutes: { count: 2, total: 20, max: 15, last: 5 },
     approvalMinutes: { count: 0, total: 0, max: 0, last: 0 }
   },
-  byAdapter: { "dry-run": 2 },
-  byMode: { balanced: 2 },
+  byAdapter: { "dry-run": 2, "value-policy": 1 },
+  byMode: { balanced: 3 },
   tokensByDomain: {
     docs: 12000,
     deploy: 4000
   },
-  recentEvents: []
+  recentEvents: [
+    { type: "review-processed", at: "2026-04-18T05:00:00.000Z", jobId: "memjob-skip", mode: "balanced", status: "skipped" }
+  ]
 });
 await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
   generatedAt: new Date().toISOString(),
@@ -1445,7 +1447,7 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark-cycle.jso
 const statusConfig = await readJson(path.join(statusRoot, "config/system.json"), {});
 const runtimeStatus = await getRuntimeStatus(statusRoot, statusConfig);
 assert.equal(runtimeStatus.queue.queued, 1);
-assert.equal(runtimeStatus.metrics.counters.processedJobs, 2);
+assert.equal(runtimeStatus.metrics.counters.processedJobs, 3);
 assert.equal(runtimeStatus.metrics.cost.liveTokensUsed, 0);
 assert.equal(runtimeStatus.costSummary.queuePressure.balancedQueued, 1);
 assert.equal(runtimeStatus.benchmarkSummary.loaded, true);
@@ -1482,6 +1484,8 @@ assert.ok(typeof runtimeStatus.nextActions[0].expectedOutcome === "string");
 assert.match(runtimeStatus.compactSummary.whyExpensive, /docs|unknown-domain|No live token burn/i);
 assert.match(runtimeStatus.compactSummary.whyTuneNow, /cheap-domain waste signal|Recent benchmark cycles|No strong tuning signal/i);
 assert.match(runtimeStatus.compactSummary.whyQueueBlocked, /queued job|not currently blocked/i);
+assert.match(runtimeStatus.compactSummary.whySkipped, /value gate|skip pattern/i);
+assert.match(runtimeStatus.compactSummary.whyLiveReview, /local-only decisions|expensive lane|metrics window/i);
 assert.match(runtimeStatus.compactSummary.whyConfident, /confidence is high/i);
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
 
@@ -1507,6 +1511,8 @@ assert.equal(runtimeReport.overview.queue.queued, 1);
 assert.equal(runtimeReport.overview.confidence.benchmark.level, "high");
 assert.equal(runtimeReport.overview.confidence.cycles.level, "high");
 assert.equal(runtimeReport.economics.topWasteDomains[0].domain, "docs");
+assert.match(runtimeReport.economics.whySkipped, /value gate|skip pattern/i);
+assert.match(runtimeReport.economics.whyLiveReview, /local-only decisions|expensive lane|metrics window/i);
 assert.equal(runtimeReport.controls.nextActions[0].action, "node src/cli.mjs tune --auto");
 assert.equal(runtimeReport.controls.tuningPreview[0].phase, "cheap-domains");
 assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaHint === "string");

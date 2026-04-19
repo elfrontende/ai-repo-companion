@@ -210,6 +210,7 @@ Daily ergonomics are better now too:
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
 - ranked status items now also include short explanation fields like `whyRanked` and `whyNow`, so the operator can quickly see why a domain or action is currently prioritized
 - `status` and `doctor` now also return compact summary blocks like `whyExpensive`, `whyTuneNow`, and `whyQueueBlocked`, so the operator can scan the control-plane state without reading the full diagnostics tree
+- those compact summaries now also explain `whySkipped` and `whyLiveReview`, so an operator can tell whether the runtime is currently saving cost via local gates or still spending mostly on justified live review paths
 - `report` packages the same runtime signals into `overview`, `economics`, `controls`, and `evidence`, so daily operator checks do not require walking multiple command trees
 - `report --format html` writes a lightweight static HTML snapshot to `state/reports/runtime-report.html`, so the same operator view can be shared or opened in a browser without building a dashboard
 - `report` now also includes compact `beforeAfter`, `rollback`, and per-phase `tuningPhases` evidence cards, so an operator can see what changed, what was rolled back, and which tuning phase is supposed to move the economics next

@@ -25,7 +25,7 @@ export async function getRuntimeStatus(rootDir, config = {}) {
     benchmarkCycleSummary,
     tuningSummary,
     nextActions: buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary),
-    compactSummary: buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary),
+    compactSummary: buildRuntimeCompactSummary(queue, metrics, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary),
     recovery: await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null)
   };
 }
@@ -673,7 +673,7 @@ function buildDoctorRecommendedActions(findings) {
     .slice(0, 5);
 }
 
-function buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary) {
+function buildRuntimeCompactSummary(queue, metrics, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary) {
   return {
     health: queue.awaitingApproval > 0
       ? "Approval backlog is currently the main note-graph bottleneck."
@@ -691,6 +691,8 @@ function buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchm
       : queue.queued > 0
         ? `${queue.queued} queued job(s) are still waiting for worker capacity or policy conditions.`
         : "The queue is not currently blocked.",
+    whySkipped: buildSkipExplanation(queue, metrics),
+    whyLiveReview: buildLiveReviewExplanation(queue, metrics, costSummary),
     whyConfident: benchmarkCycleSummary.confidence?.level === "high"
       ? `Long-run cycle confidence is high because ${benchmarkCycleSummary.confidence.reasons?.[0] ?? "the recent benchmark windows are stable"}.`
       : benchmarkSummary.confidence?.level === "high"
@@ -699,9 +701,40 @@ function buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchm
     whyNotTuneHarder: benchmarkSummary.domainDiagnostics.some((item) => item.isNoisy)
       ? "At least one cheap domain is still noisy, so aggressive tightening would overreact to unstable benchmark evidence."
       : tuningSummary.canaryStatus === "pending"
-        ? "A pending canary still needs reconciliation before wider tuning changes are safe."
-        : "No major blocker is currently preventing another bounded tuning step."
+      ? "A pending canary still needs reconciliation before wider tuning changes are safe."
+      : "No major blocker is currently preventing another bounded tuning step."
   };
+}
+
+function buildSkipExplanation(queue, metrics) {
+  if ((metrics?.counters?.skippedJobs ?? 0) <= 0) {
+    return queue.awaitingApproval > 0
+      ? "Recent sensitive work is pausing at the approval barrier instead of being skipped outright."
+      : "No meaningful local skip pattern is visible yet.";
+  }
+
+  const topSkippedAdapter = metrics?.topAdapters?.[0]?.key ?? null;
+  if (topSkippedAdapter === "value-policy" || metrics?.topAdapters?.some((item) => item.key === "value-policy")) {
+    return "Recent balanced jobs are being skipped locally by the value gate before a live model call, which is currently the main source of saved review runs.";
+  }
+
+  return "Some review work is already being stopped locally before it reaches note apply, so part of the current cost pressure is being absorbed without another live run.";
+}
+
+function buildLiveReviewExplanation(queue, metrics, costSummary) {
+  if ((costSummary?.liveTokensUsed ?? 0) > 0) {
+    return `Current live review spend is concentrated on the ${costSummary.highestCostMode ?? "unknown"} lane in ${costSummary.highestCostDomain ?? "unknown-domain"}, which means the remaining live calls are mostly coming from jobs that passed the local value and safety gates.`;
+  }
+
+  if ((queue.jobs ?? []).some((job) => job.status === "queued" && job.mode === "expensive")) {
+    return "The next likely live spend is sitting in the expensive lane, where higher-risk review work is intentionally allowed to bypass the cheaper local skip path.";
+  }
+
+  if ((metrics?.counters?.skippedJobs ?? 0) > 0) {
+    return "The runtime is currently preferring local-only decisions over live review for weak balanced jobs, so live token spend is being suppressed upstream.";
+  }
+
+  return "No strong live-review decision pattern is visible yet because the current metrics window is still mostly empty.";
 }
 
 function buildDoctorCompactSummary(findings) {
