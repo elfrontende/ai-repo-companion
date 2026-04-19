@@ -159,6 +159,14 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  for (const item of benchmarkSummary.domainDiagnostics.filter((entry) => entry.isNoisy)) {
+    findings.push({
+      severity: "info",
+      code: `domain-signal-noisy-${item.domain}`,
+      message: `${item.domain} has a noisy benchmark signal with ${item.changeCount} cheapest-variant flips in the recent trend window, so tighter tuning should wait for more stable evidence.`
+    });
+  }
+
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     queue,
@@ -292,10 +300,13 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
       const configuredThreshold = Number(storedThreshold) || globalThreshold;
       const suggestedThreshold = Math.min(90, globalThreshold + 5);
       const saverTrendStreak = Number(benchmark?.trend?.byDomain?.[domain]?.cheapestVariantStreak?.count) || 0;
+      const changeCount = Number(benchmark?.trend?.byDomain?.[domain]?.changeCount) || 0;
+      const isNoisy = benchmark?.trend?.byDomain?.[domain]?.isNoisy === true;
       const wasteScore = Math.round((Number(tokenMap[domain]) || 0) * Math.max(1, reductionGap));
       const shouldTightenValueGate = summary?.cheapestVariant === "saver"
         && reductionGap >= 4
         && saverTrendStreak >= 2
+        && !isNoisy
         && configuredThreshold < suggestedThreshold;
 
       return {
@@ -309,6 +320,8 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
         suggestedThreshold,
         liveTokensUsed: Number(tokenMap[domain]) || 0,
         wasteScore,
+        changeCount,
+        isNoisy,
         shouldTightenValueGate
       };
     })
