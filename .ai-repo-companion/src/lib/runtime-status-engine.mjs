@@ -467,9 +467,12 @@ function buildTopWasteDomains(domainDiagnostics) {
       reductionGap: item.reductionGap,
       wasteScore: item.wasteScore,
       evidenceScore: buildDomainEvidenceScore(item),
+      evidenceBand: inferEvidenceBand(buildDomainEvidenceScore(item)),
       cheapestVariant: item.cheapestVariant,
       riskLevel: "low",
       expectedSavingsHint: buildDomainSavingsHint(item),
+      expectedOutcome: buildDomainWasteOutcome(item),
+      impactSummary: buildDomainImpactSummary(item),
       whyRanked: `${item.domain} is consuming ${item.liveTokensUsed} live tokens with a ${item.reductionGap.toFixed(2)} point saver advantage, so it is currently the strongest cheap-domain waste signal.`
     }));
 }
@@ -493,8 +496,11 @@ function buildSafeSavingsOpportunities(domainDiagnostics) {
       reductionGap: item.reductionGap,
       action: `Raise minScoreByDomain.${item.domain} to ${item.suggestedThreshold}`,
       evidenceScore: buildDomainEvidenceScore(item),
+      evidenceBand: inferEvidenceBand(buildDomainEvidenceScore(item)),
       riskLevel: "low",
       expectedSavingsHint: buildDomainSavingsHint(item),
+      expectedOutcome: buildDomainTuneOutcome(item),
+      impactSummary: buildDomainImpactSummary(item),
       whyRanked: `${item.domain} has a stable saver streak of ${item.saverTrendStreak} runs and still burns ${item.liveTokensUsed} live tokens, so tightening its local gate is the safest near-term savings move.`
     }));
 }
@@ -508,8 +514,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs benchmark",
       reason: "No synthetic benchmark exists yet, so tuning and cost guidance are still blind.",
       evidenceScore: 95,
+      evidenceBand: inferEvidenceBand(95),
       riskLevel: "low",
       expectedOutcome: "Creates the missing synthetic cost baseline for every later tuning and rollback decision.",
+      impactSummary: "Unblocks every later cost recommendation with a fresh baseline.",
       whyNow: "Benchmark data is the prerequisite for nearly every bounded tuning or rollback decision."
     });
   } else if (benchmarkSummary.isStale) {
@@ -518,8 +526,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs benchmark",
       reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading.",
       evidenceScore: 86,
+      evidenceBand: inferEvidenceBand(86),
       riskLevel: "low",
       expectedOutcome: "Refreshes stale cost evidence before another bounded policy change is considered.",
+      impactSummary: "Replaces stale economics evidence before another tune changes behavior.",
       whyNow: "Fresh benchmark evidence has higher priority than further tuning on stale numbers."
     });
   }
@@ -530,8 +540,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
       reason: "No benchmark cycle exists yet, so longer-run tuning behavior is still unvalidated.",
       evidenceScore: 82,
+      evidenceBand: inferEvidenceBand(82),
       riskLevel: "low",
       expectedOutcome: "Adds short multi-run evidence, so one lucky benchmark does not drive the next tuning step alone.",
+      impactSummary: "Adds a short long-run signal before another tuning move.",
       whyNow: "A short benchmark cycle is the fastest way to verify that recent tuning wins are not one-run noise."
     });
   } else if (benchmarkCycleSummary.isStale) {
@@ -540,8 +552,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
       reason: "The last benchmark cycle is stale, so long-run tuning guidance may have drifted.",
       evidenceScore: 80,
+      evidenceBand: inferEvidenceBand(80),
       riskLevel: "low",
       expectedOutcome: "Refreshes longer-run trend data before another tuning decision relies on old cycle evidence.",
+      impactSummary: "Refreshes long-run evidence so current tuning advice is still trustworthy.",
       whyNow: "Cycle-level evidence is more important than another manual tune when the existing long-run signal is old."
     });
   } else if (benchmarkCycleSummary.trendDirection === "degrading") {
@@ -550,8 +564,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
       reason: benchmarkCycleSummary.recommendation,
       evidenceScore: 84,
+      evidenceBand: inferEvidenceBand(84),
       riskLevel: "low",
       expectedOutcome: "Re-checks the degrading economics trend before more bounded tuning widens the blast radius.",
+      impactSummary: "Confirms or rejects the current degrading cycle signal.",
       whyNow: "The last few benchmark cycles already point to degrading economics, so the next step is to reproduce that trend before widening tuning changes."
     });
   }
@@ -562,8 +578,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs tune --reconcile",
       reason: "A pending canary is waiting for a post-tune benchmark verdict.",
       evidenceScore: 90,
+      evidenceBand: inferEvidenceBand(90),
       riskLevel: "medium",
       expectedOutcome: "Either accepts the last bounded tune or rolls it back before more changes stack on top.",
+      impactSummary: "Resolves the only bounded change that can still poison later tuning decisions.",
       whyNow: "Resolve the existing canary before stacking another tuning change on top of it."
     });
   }
@@ -574,8 +592,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs tune --reconcile",
       reason: benchmarkSummary.tuningComparison.summary,
       evidenceScore: 88,
+      evidenceBand: inferEvidenceBand(88),
       riskLevel: "medium",
       expectedOutcome: "Reduces the chance of carrying a regressing tuning change into the next benchmark window.",
+      impactSummary: "Cuts off a possible tuning regression before it spreads into the next cycle.",
       whyNow: "The latest benchmark already suggests a tuning regression, so rollback/reconcile outranks fresh tuning."
     });
   }
@@ -587,8 +607,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs tune --auto",
       reason: `${driftingDomain.domain} still favors saver and is burning tokens above its configured domain gate.`,
       evidenceScore: buildDomainEvidenceScore(driftingDomain),
+      evidenceBand: inferEvidenceBand(buildDomainEvidenceScore(driftingDomain)),
       riskLevel: "low",
       expectedOutcome: buildDomainTuneOutcome(driftingDomain),
+      impactSummary: buildDomainImpactSummary(driftingDomain),
       whyNow: `${driftingDomain.domain} is the highest-confidence cheap-domain drift signal in the current benchmark summary.`
     });
   }
@@ -599,8 +621,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs tune --auto",
       reason: "Saver keeps winning synthetic cost checks, but the last auto-tune is stale.",
       evidenceScore: 68,
+      evidenceBand: inferEvidenceBand(68),
       riskLevel: "medium",
       expectedOutcome: "Refreshes bounded policy changes so the runtime keeps tracking the cheaper synthetic lane.",
+      impactSummary: "Refreshes stale tuning so the cheaper balanced lane remains the default.",
       whyNow: "The system already has a stable cheaper lane, so refreshing bounded auto-tune is more useful than manual tweaking."
     });
   }
@@ -611,8 +635,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "Run the next live balanced review with --costMode saver",
       reason: "Balanced queue pressure is high while useful note work per token is still expensive.",
       evidenceScore: 62,
+      evidenceBand: inferEvidenceBand(62),
       riskLevel: "low",
       expectedOutcome: "Cuts the next balanced live run cost without changing repository policy or note graph behavior.",
+      impactSummary: "Gives the operator a fast one-run cost cut with no policy mutation.",
       whyNow: "This is the quickest operator-side cost reduction that does not mutate repository policy."
     });
   }
@@ -623,8 +649,10 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       action: "node src/cli.mjs queue",
       reason: "There are pending approvals waiting for a manual decision before notes can change.",
       evidenceScore: 58,
+      evidenceBand: inferEvidenceBand(58),
       riskLevel: "low",
       expectedOutcome: "Clears approval bottlenecks so successful review work can actually reach the note graph.",
+      impactSummary: "Unblocks already-approved note work that is stuck behind manual review.",
       whyNow: "Manual approvals block note graph progress regardless of the rest of the tuning state."
     });
   }
@@ -646,8 +674,10 @@ function buildDoctorRecommendedActions(findings) {
       reason,
       whyNow: reason,
       evidenceScore: inferRecommendedActionEvidenceScore(action),
+      evidenceBand: inferEvidenceBand(inferRecommendedActionEvidenceScore(action)),
       riskLevel: inferRecommendedActionRisk(action),
-      expectedOutcome: inferRecommendedActionOutcome(action)
+      expectedOutcome: inferRecommendedActionOutcome(action),
+      impactSummary: inferRecommendedActionImpact(action)
     });
   };
 
@@ -782,6 +812,17 @@ function buildDomainTuneOutcome(item) {
   return `${item.domain} is low-risk and still has a ${item.reductionGap.toFixed(2)} point saver advantage, so bounded auto-tune should tighten it before broader lane changes.`;
 }
 
+function buildDomainWasteOutcome(item) {
+  return `${item.domain} is the current cheap-domain cost hotspot, so fixing its local drift should reduce live spend without touching high-risk lanes.`;
+}
+
+function buildDomainImpactSummary(item) {
+  const thresholdHint = item.suggestedThreshold
+    ? `A tighter threshold around ${item.suggestedThreshold} is likely to cut weak review jobs earlier.`
+    : "A tighter local gate is likely to cut weak review jobs earlier.";
+  return `${item.domain} is carrying ${item.liveTokensUsed} live tokens with a ${item.reductionGap.toFixed(2)} point saver edge. ${thresholdHint}`;
+}
+
 function buildDomainEvidenceScore(item) {
   let score = 35;
   score += Math.min(25, Math.round((Number(item.liveTokensUsed) || 0) / 1000));
@@ -791,6 +832,16 @@ function buildDomainEvidenceScore(item) {
     score -= 18;
   }
   return Math.max(0, Math.min(100, score));
+}
+
+function inferEvidenceBand(score) {
+  if (score >= 80) {
+    return "high";
+  }
+  if (score >= 55) {
+    return "medium";
+  }
+  return "low";
 }
 
 function inferRecommendedActionRisk(action) {
@@ -839,4 +890,23 @@ function inferRecommendedActionOutcome(action) {
     return "Lets the runtime clear stale execution state or finish an interrupted recovery path.";
   }
   return "Resolves the highest-priority local control-plane issue before more AI work is queued.";
+}
+
+function inferRecommendedActionImpact(action) {
+  if (action.includes("benchmark --iterations")) {
+    return "Strengthens long-run evidence before another bounded tuning cycle.";
+  }
+  if (action.includes("benchmark")) {
+    return "Refreshes the baseline that later cost and rollback decisions depend on.";
+  }
+  if (action.includes("tune --reconcile")) {
+    return "Prevents a stale canary from distorting the next tuning move.";
+  }
+  if (action.includes("tune --auto")) {
+    return "Applies the highest-confidence bounded savings move available right now.";
+  }
+  if (action.includes("worker")) {
+    return "Unblocks the runtime so queued work can continue safely.";
+  }
+  return "Improves runtime health through a bounded operator action.";
 }
