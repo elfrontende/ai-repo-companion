@@ -14,6 +14,7 @@ export async function analyzePolicyTuning(rootDir) {
   const metrics = await getReviewMetrics(rootDir);
   const benchmark = await readJson(benchmarkPath, null);
   const suggestions = buildPolicySuggestions(config, metrics, benchmark);
+  const tuningPlan = buildTuningPlan(suggestions);
 
   return {
     configPath,
@@ -21,11 +22,13 @@ export async function analyzePolicyTuning(rootDir) {
     metrics,
     benchmark,
     suggestions,
+    tuningPlan,
     summary: {
       benchmarkLoaded: Boolean(benchmark?.aggregate),
       suggestionCount: suggestions.length,
       applyableCount: suggestions.filter((item) => item.canApply).length,
-      autoApplicableCount: suggestions.filter((item) => item.canAutoApply).length
+      autoApplicableCount: suggestions.filter((item) => item.canAutoApply).length,
+      tuningPlanSteps: tuningPlan.steps.length
     }
   };
 }
@@ -634,6 +637,50 @@ function compareAutoTuneSuggestions(left, right) {
     return priorityDelta;
   }
   return String(left.id).localeCompare(String(right.id));
+}
+
+function buildTuningPlan(suggestions) {
+  const steps = [
+    {
+      phase: "cheap-domains",
+      title: "Tighten low-risk domains first",
+      suggestions: suggestions.filter((item) => item.id.startsWith("domain-tighten-value-gate-"))
+    },
+    {
+      phase: "balanced-lane",
+      title: "Lean the balanced lane",
+      suggestions: suggestions.filter((item) => item.id.startsWith("benchmark-") || item.id === "tighten-value-gate" || item.id === "relax-value-gate")
+    },
+    {
+      phase: "global-policy",
+      title: "Adjust global queue and ranking pressure",
+      suggestions: suggestions.filter((item) => ["raise-domain-threshold", "tighten-ranking-floor", "raise-apply-budget"].includes(item.id))
+    },
+    {
+      phase: "manual-checkpoints",
+      title: "Revisit approval timing and manual controls",
+      suggestions: suggestions.filter((item) => ["extend-approval-ttl", "widen-expiry-action"].includes(item.id))
+    }
+  ]
+    .map((step) => ({
+      ...step,
+      suggestions: [...step.suggestions].sort(compareAutoTuneSuggestions)
+    }))
+    .filter((step) => step.suggestions.length > 0);
+
+  return {
+    steps: steps.map((step, index) => ({
+      order: index + 1,
+      phase: step.phase,
+      title: step.title,
+      suggestionIds: step.suggestions.map((item) => item.id),
+      autoApplicableCount: step.suggestions.filter((item) => item.canAutoApply).length,
+      applyableCount: step.suggestions.filter((item) => item.canApply).length
+    })),
+    recommendation: steps[0]
+      ? `Start with ${steps[0].title.toLowerCase()} before moving to broader policy changes.`
+      : "No bounded tuning plan is needed right now."
+  };
 }
 
 function applyConfigPatch(config, pathSegments, value) {
