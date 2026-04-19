@@ -701,6 +701,10 @@ assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "domain-tighten-
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-budget"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
 assert.equal(tuningAnalysis.tuningPlan.steps[0].phase, "cheap-domains");
+assert.equal(tuningAnalysis.workflow.phases[0].phase, "cheap-domains");
+assert.match(tuningAnalysis.workflow.phases[0].commands.preview, /--phase cheap-domains/);
+assert.match(tuningAnalysis.workflow.phases[0].commands.reconcile, /--phase cheap-domains/);
+assert.match(tuningAnalysis.workflow.phases[0].recommendedLoop[2], /benchmark cycle/i);
 assert.ok(tuningAnalysis.tuningPlan.steps[0].suggestionIds.includes("domain-tighten-value-gate-docs"));
 assert.equal(tuningAnalysis.tuningPlan.steps[0].expectedImpact.domains[0].domain, "docs");
 assert.equal(tuningAnalysis.tuningPlan.steps[0].riskLevel, "low");
@@ -727,6 +731,7 @@ const phaseOnlyAnalysis = await analyzePolicyTuning(tuningRoot, { phase: "cheap-
 assert.equal(phaseOnlyAnalysis.selectedPhase, "cheap-domains");
 assert.equal(phaseOnlyAnalysis.suggestions.every((item) => item.id.startsWith("domain-tighten-value-gate-")), true);
 assert.equal(phaseOnlyAnalysis.tuningPlan.steps.length, 1);
+assert.match(phaseOnlyAnalysis.workflow.recommendation, /cheap-domains phase/i);
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
 assert.ok(tuningApply.applied.length >= 8);

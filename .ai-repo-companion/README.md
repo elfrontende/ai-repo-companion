@@ -241,6 +241,7 @@ Policy tuning is now metrics-aware:
 - tuning suggestions and tuning-plan steps now also include small `expectedImpact` previews, so the operator can see which domains or token deltas each bounded change is targeting
 - tuning-plan steps now also include `whyThisPhase`, so the operator can see why cheap-domain fixes should land before broader lane changes
 - tuning suggestions and phases now also expose compact impact/risk summaries, so `tune` shows both likely savings and likely blast radius before anything is applied
+- tune analysis now also returns a small `workflow` block per phase, including `preview/apply/auto/benchmark/reconcile` commands, so operators can run bounded tuning as a repeatable loop instead of as raw config mutations
 - `tune`, `tune --apply`, and `tune --auto` now support `--phase cheap-domains|balanced-lane|global-policy|manual-checkpoints` for bounded phase-by-phase execution
 - `tune --reconcile` now also supports `--phase ...`, so a regressing canary can roll back only the risky phase first instead of discarding the entire bounded tune set at once
 - `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`
