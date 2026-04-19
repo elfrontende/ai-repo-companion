@@ -305,6 +305,7 @@
     "benchmarkTrendWindow": 5,
     "benchmarkCycleHistoryRetentionEntries": 20,
     "benchmarkCycleTrendWindow": 4,
+    "benchmarkCycleComparisonWindow": 2,
     "benchmarkCycleFreshnessMinutes": 2880,
     "rollbackRegressionThresholdPercent": 3,
     "rollbackOnCheapestVariantShift": true,

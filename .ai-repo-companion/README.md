@@ -230,6 +230,7 @@ Synthetic validation is built in too:
 - each benchmark report now also stores a `tuningComparison` block when a previous tune baseline exists, so the operator can see whether the latest benchmark actually improved or degraded after tuning
 - benchmark cycles also return a compact summary for first-vs-last economics, accepted canaries, and rollback counts across the loop
 - benchmark cycles now also persist their own report/history files and produce a short `multiCycle` summary, so several recent cycle runs can be compared instead of treating each loop as an isolated snapshot
+- `multiCycle` now also includes a small window-to-window comparison, so the control plane can tell whether the latest cycle window is truly improving over the previous one instead of only reporting a local streak
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 
