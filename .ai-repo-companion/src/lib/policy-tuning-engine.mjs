@@ -514,6 +514,15 @@ function summarizeBenchmarkForCanary(benchmark) {
     cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
     saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
+    byVariant: Object.fromEntries(
+      Object.entries(benchmark?.aggregate?.byVariant ?? {}).map(([variant, summary]) => [
+        variant,
+        {
+          totalTokens: summary?.totalTokens ?? null,
+          reductionPercent: summary?.reductionPercent ?? null
+        }
+      ])
+    ),
     byDomain: monitoredDomains
   };
 }
