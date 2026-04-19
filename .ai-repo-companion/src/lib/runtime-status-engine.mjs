@@ -466,6 +466,7 @@ function buildTopWasteDomains(domainDiagnostics) {
       liveTokensUsed: item.liveTokensUsed,
       reductionGap: item.reductionGap,
       wasteScore: item.wasteScore,
+      evidenceScore: buildDomainEvidenceScore(item),
       cheapestVariant: item.cheapestVariant,
       riskLevel: "low",
       expectedSavingsHint: buildDomainSavingsHint(item),
@@ -491,6 +492,7 @@ function buildSafeSavingsOpportunities(domainDiagnostics) {
       saverTrendStreak: item.saverTrendStreak,
       reductionGap: item.reductionGap,
       action: `Raise minScoreByDomain.${item.domain} to ${item.suggestedThreshold}`,
+      evidenceScore: buildDomainEvidenceScore(item),
       riskLevel: "low",
       expectedSavingsHint: buildDomainSavingsHint(item),
       whyRanked: `${item.domain} has a stable saver streak of ${item.saverTrendStreak} runs and still burns ${item.liveTokensUsed} live tokens, so tightening its local gate is the safest near-term savings move.`
@@ -505,6 +507,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 100,
       action: "node src/cli.mjs benchmark",
       reason: "No synthetic benchmark exists yet, so tuning and cost guidance are still blind.",
+      evidenceScore: 95,
       riskLevel: "low",
       expectedOutcome: "Creates the missing synthetic cost baseline for every later tuning and rollback decision.",
       whyNow: "Benchmark data is the prerequisite for nearly every bounded tuning or rollback decision."
@@ -514,6 +517,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 95,
       action: "node src/cli.mjs benchmark",
       reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading.",
+      evidenceScore: 86,
       riskLevel: "low",
       expectedOutcome: "Refreshes stale cost evidence before another bounded policy change is considered.",
       whyNow: "Fresh benchmark evidence has higher priority than further tuning on stale numbers."
@@ -525,6 +529,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 94,
       action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
       reason: "No benchmark cycle exists yet, so longer-run tuning behavior is still unvalidated.",
+      evidenceScore: 82,
       riskLevel: "low",
       expectedOutcome: "Adds short multi-run evidence, so one lucky benchmark does not drive the next tuning step alone.",
       whyNow: "A short benchmark cycle is the fastest way to verify that recent tuning wins are not one-run noise."
@@ -534,6 +539,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 89,
       action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
       reason: "The last benchmark cycle is stale, so long-run tuning guidance may have drifted.",
+      evidenceScore: 80,
       riskLevel: "low",
       expectedOutcome: "Refreshes longer-run trend data before another tuning decision relies on old cycle evidence.",
       whyNow: "Cycle-level evidence is more important than another manual tune when the existing long-run signal is old."
@@ -543,6 +549,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 88,
       action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
       reason: benchmarkCycleSummary.recommendation,
+      evidenceScore: 84,
       riskLevel: "low",
       expectedOutcome: "Re-checks the degrading economics trend before more bounded tuning widens the blast radius.",
       whyNow: "The last few benchmark cycles already point to degrading economics, so the next step is to reproduce that trend before widening tuning changes."
@@ -554,6 +561,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 92,
       action: "node src/cli.mjs tune --reconcile",
       reason: "A pending canary is waiting for a post-tune benchmark verdict.",
+      evidenceScore: 90,
       riskLevel: "medium",
       expectedOutcome: "Either accepts the last bounded tune or rolls it back before more changes stack on top.",
       whyNow: "Resolve the existing canary before stacking another tuning change on top of it."
@@ -565,6 +573,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 90,
       action: "node src/cli.mjs tune --reconcile",
       reason: benchmarkSummary.tuningComparison.summary,
+      evidenceScore: 88,
       riskLevel: "medium",
       expectedOutcome: "Reduces the chance of carrying a regressing tuning change into the next benchmark window.",
       whyNow: "The latest benchmark already suggests a tuning regression, so rollback/reconcile outranks fresh tuning."
@@ -577,6 +586,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 80,
       action: "node src/cli.mjs tune --auto",
       reason: `${driftingDomain.domain} still favors saver and is burning tokens above its configured domain gate.`,
+      evidenceScore: buildDomainEvidenceScore(driftingDomain),
       riskLevel: "low",
       expectedOutcome: buildDomainTuneOutcome(driftingDomain),
       whyNow: `${driftingDomain.domain} is the highest-confidence cheap-domain drift signal in the current benchmark summary.`
@@ -588,6 +598,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 70,
       action: "node src/cli.mjs tune --auto",
       reason: "Saver keeps winning synthetic cost checks, but the last auto-tune is stale.",
+      evidenceScore: 68,
       riskLevel: "medium",
       expectedOutcome: "Refreshes bounded policy changes so the runtime keeps tracking the cheaper synthetic lane.",
       whyNow: "The system already has a stable cheaper lane, so refreshing bounded auto-tune is more useful than manual tweaking."
@@ -599,6 +610,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 60,
       action: "Run the next live balanced review with --costMode saver",
       reason: "Balanced queue pressure is high while useful note work per token is still expensive.",
+      evidenceScore: 62,
       riskLevel: "low",
       expectedOutcome: "Cuts the next balanced live run cost without changing repository policy or note graph behavior.",
       whyNow: "This is the quickest operator-side cost reduction that does not mutate repository policy."
@@ -610,6 +622,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
       priority: 55,
       action: "node src/cli.mjs queue",
       reason: "There are pending approvals waiting for a manual decision before notes can change.",
+      evidenceScore: 58,
       riskLevel: "low",
       expectedOutcome: "Clears approval bottlenecks so successful review work can actually reach the note graph.",
       whyNow: "Manual approvals block note graph progress regardless of the rest of the tuning state."
@@ -632,6 +645,7 @@ function buildDoctorRecommendedActions(findings) {
       action,
       reason,
       whyNow: reason,
+      evidenceScore: inferRecommendedActionEvidenceScore(action),
       riskLevel: inferRecommendedActionRisk(action),
       expectedOutcome: inferRecommendedActionOutcome(action)
     });
@@ -768,6 +782,17 @@ function buildDomainTuneOutcome(item) {
   return `${item.domain} is low-risk and still has a ${item.reductionGap.toFixed(2)} point saver advantage, so bounded auto-tune should tighten it before broader lane changes.`;
 }
 
+function buildDomainEvidenceScore(item) {
+  let score = 35;
+  score += Math.min(25, Math.round((Number(item.liveTokensUsed) || 0) / 1000));
+  score += Math.min(20, Math.round(Number(item.reductionGap) || 0));
+  score += Math.min(15, (Number(item.saverTrendStreak) || 0) * 3);
+  if (item.isNoisy) {
+    score -= 18;
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
 function inferRecommendedActionRisk(action) {
   if (action.includes("tune --reconcile")) {
     return "medium";
@@ -776,6 +801,25 @@ function inferRecommendedActionRisk(action) {
     return "medium";
   }
   return "low";
+}
+
+function inferRecommendedActionEvidenceScore(action) {
+  if (action.includes("benchmark --iterations")) {
+    return 82;
+  }
+  if (action.includes("benchmark")) {
+    return 90;
+  }
+  if (action.includes("tune --reconcile")) {
+    return 88;
+  }
+  if (action.includes("tune --auto")) {
+    return 74;
+  }
+  if (action.includes("queue")) {
+    return 58;
+  }
+  return 55;
 }
 
 function inferRecommendedActionOutcome(action) {
