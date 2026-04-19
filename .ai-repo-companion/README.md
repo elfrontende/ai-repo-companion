@@ -205,6 +205,7 @@ Daily ergonomics are better now too:
 - `status` also includes domain diagnostics for low-risk domains, so you can see which domain is burning tokens and which one still has value-gate drift
 - `status` now also returns `nextActions`, a short prioritized list of the most useful local commands to run next
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
+- ranked status items now also include short explanation fields like `whyRanked` and `whyNow`, so the operator can quickly see why a domain or action is currently prioritized
 - `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `doctor` also warns when a cheap domain like `docs` or `deploy` keeps favoring `saver` but its `minScoreByDomain` threshold is still too loose
 - `doctor` now also flags noisy domains whose cheapest variant flips too often, so auto-tune waits for steadier benchmark evidence
@@ -234,6 +235,7 @@ Policy tuning is now metrics-aware:
 - `node src/cli.mjs tune` reads local review metrics and proposes bounded config changes
 - tune analysis now also returns a small ordered `tuningPlan`, so cheap-domain fixes are sequenced before broader balanced-lane or global policy changes
 - tuning suggestions and tuning-plan steps now also include small `expectedImpact` previews, so the operator can see which domains or token deltas each bounded change is targeting
+- tuning-plan steps now also include `whyThisPhase`, so the operator can see why cheap-domain fixes should land before broader lane changes
 - `tune`, `tune --apply`, and `tune --auto` now support `--phase cheap-domains|balanced-lane|global-policy|manual-checkpoints` for bounded phase-by-phase execution
 - `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`
 - `node src/cli.mjs tune --auto` applies only the narrower allowlisted suggestions, respects a cooldown, and records local tuning history in `state/tuning/`

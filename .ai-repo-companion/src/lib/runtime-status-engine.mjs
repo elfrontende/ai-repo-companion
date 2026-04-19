@@ -348,7 +348,8 @@ function buildTopWasteDomains(domainDiagnostics) {
       liveTokensUsed: item.liveTokensUsed,
       reductionGap: item.reductionGap,
       wasteScore: item.wasteScore,
-      cheapestVariant: item.cheapestVariant
+      cheapestVariant: item.cheapestVariant,
+      whyRanked: `${item.domain} is consuming ${item.liveTokensUsed} live tokens with a ${item.reductionGap.toFixed(2)} point saver advantage, so it is currently the strongest cheap-domain waste signal.`
     }));
 }
 
@@ -369,7 +370,8 @@ function buildSafeSavingsOpportunities(domainDiagnostics) {
       liveTokensUsed: item.liveTokensUsed,
       saverTrendStreak: item.saverTrendStreak,
       reductionGap: item.reductionGap,
-      action: `Raise minScoreByDomain.${item.domain} to ${item.suggestedThreshold}`
+      action: `Raise minScoreByDomain.${item.domain} to ${item.suggestedThreshold}`,
+      whyRanked: `${item.domain} has a stable saver streak of ${item.saverTrendStreak} runs and still burns ${item.liveTokensUsed} live tokens, so tightening its local gate is the safest near-term savings move.`
     }));
 }
 
@@ -380,13 +382,15 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 100,
       action: "node src/cli.mjs benchmark",
-      reason: "No synthetic benchmark exists yet, so tuning and cost guidance are still blind."
+      reason: "No synthetic benchmark exists yet, so tuning and cost guidance are still blind.",
+      whyNow: "Benchmark data is the prerequisite for nearly every bounded tuning or rollback decision."
     });
   } else if (benchmarkSummary.isStale) {
     actions.push({
       priority: 95,
       action: "node src/cli.mjs benchmark",
-      reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading."
+      reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading.",
+      whyNow: "Fresh benchmark evidence has higher priority than further tuning on stale numbers."
     });
   }
 
@@ -394,7 +398,8 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 92,
       action: "node src/cli.mjs tune --reconcile",
-      reason: "A pending canary is waiting for a post-tune benchmark verdict."
+      reason: "A pending canary is waiting for a post-tune benchmark verdict.",
+      whyNow: "Resolve the existing canary before stacking another tuning change on top of it."
     });
   }
 
@@ -402,7 +407,8 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 90,
       action: "node src/cli.mjs tune --reconcile",
-      reason: benchmarkSummary.tuningComparison.summary
+      reason: benchmarkSummary.tuningComparison.summary,
+      whyNow: "The latest benchmark already suggests a tuning regression, so rollback/reconcile outranks fresh tuning."
     });
   }
 
@@ -411,7 +417,8 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 80,
       action: "node src/cli.mjs tune --auto",
-      reason: `${driftingDomain.domain} still favors saver and is burning tokens above its configured domain gate.`
+      reason: `${driftingDomain.domain} still favors saver and is burning tokens above its configured domain gate.`,
+      whyNow: `${driftingDomain.domain} is the highest-confidence cheap-domain drift signal in the current benchmark summary.`
     });
   }
 
@@ -419,7 +426,8 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 70,
       action: "node src/cli.mjs tune --auto",
-      reason: "Saver keeps winning synthetic cost checks, but the last auto-tune is stale."
+      reason: "Saver keeps winning synthetic cost checks, but the last auto-tune is stale.",
+      whyNow: "The system already has a stable cheaper lane, so refreshing bounded auto-tune is more useful than manual tweaking."
     });
   }
 
@@ -427,7 +435,8 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 60,
       action: "Run the next live balanced review with --costMode saver",
-      reason: "Balanced queue pressure is high while useful note work per token is still expensive."
+      reason: "Balanced queue pressure is high while useful note work per token is still expensive.",
+      whyNow: "This is the quickest operator-side cost reduction that does not mutate repository policy."
     });
   }
 
@@ -435,7 +444,8 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
     actions.push({
       priority: 55,
       action: "node src/cli.mjs queue",
-      reason: "There are pending approvals waiting for a manual decision before notes can change."
+      reason: "There are pending approvals waiting for a manual decision before notes can change.",
+      whyNow: "Manual approvals block note graph progress regardless of the rest of the tuning state."
     });
   }
 
@@ -450,7 +460,7 @@ function buildDoctorRecommendedActions(findings) {
     if (!condition) {
       return;
     }
-    actions.push({ priority, action, reason });
+    actions.push({ priority, action, reason, whyNow: reason });
   };
 
   push(

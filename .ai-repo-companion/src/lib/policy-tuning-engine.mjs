@@ -711,6 +711,7 @@ function buildTuningPlan(suggestions) {
       title: step.title,
       suggestionIds: step.suggestions.map((item) => item.id),
       expectedImpact: summarizePlanStepImpact(step.suggestions),
+      whyThisPhase: explainPlanPhase(step.phase, step.suggestions),
       autoApplicableCount: step.suggestions.filter((item) => item.canAutoApply).length,
       applyableCount: step.suggestions.filter((item) => item.canApply).length
     })),
@@ -718,6 +719,29 @@ function buildTuningPlan(suggestions) {
       ? `Start with ${steps[0].title.toLowerCase()} before moving to broader policy changes.`
       : "No bounded tuning plan is needed right now."
   };
+}
+
+function explainPlanPhase(phase, suggestions) {
+  if (phase === "cheap-domains") {
+    const first = suggestions[0]?.expectedImpact;
+    if (first?.domain) {
+      return `${first.domain} is currently the lead cheap-domain savings target, so bounded tuning starts there before broader balanced-lane changes.`;
+    }
+    return "Cheap low-risk domains are tuned first because they usually offer the safest token savings.";
+  }
+  if (phase === "balanced-lane") {
+    const estimatedTokenDelta = suggestions.reduce((total, item) => total + (Number(item.expectedImpact?.estimatedTokenDelta) || 0), 0);
+    return estimatedTokenDelta > 0
+      ? `Balanced-lane tuning is next because the current benchmark suggests about ${estimatedTokenDelta} extra tokens versus the leaner saver lane.`
+      : "Balanced-lane tuning comes after cheap domains because it changes broader review behavior.";
+  }
+  if (phase === "global-policy") {
+    return "Global policy changes are delayed until after cheap-domain and balanced-lane fixes because they have wider blast radius.";
+  }
+  if (phase === "manual-checkpoints") {
+    return "Manual checkpoint changes come last because they alter operator workflow rather than the cheapest runtime lane.";
+  }
+  return "This phase contains bounded follow-up tuning work.";
 }
 
 function filterSuggestionsByPhase(suggestions, tuningPlan, selectedPhase) {
