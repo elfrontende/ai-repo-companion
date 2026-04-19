@@ -1,4 +1,5 @@
 import { getRuntimeStatus, runRuntimeDoctor } from "./runtime-status-engine.mjs";
+import { analyzePolicyTuning } from "./policy-tuning-engine.mjs";
 
 // The report command is the shortest operator-facing view of the control plane.
 // It intentionally collapses status + doctor into one compact structure so a
@@ -8,13 +9,14 @@ import { getRuntimeStatus, runRuntimeDoctor } from "./runtime-status-engine.mjs"
 export async function buildRuntimeReport(rootDir, config = {}) {
   const status = await getRuntimeStatus(rootDir, config);
   const doctor = await runRuntimeDoctor(rootDir, config);
+  const tuning = await analyzePolicyTuning(rootDir);
 
   return {
     generatedAt: new Date().toISOString(),
     overview: buildOverview(status),
     economics: buildEconomics(status),
-    controls: buildControls(status, doctor),
-    evidence: buildEvidence(status, doctor)
+    controls: buildControls(status, doctor, tuning),
+    evidence: buildEvidence(status, doctor, tuning)
   };
 }
 
@@ -60,17 +62,20 @@ function buildEconomics(status) {
   };
 }
 
-function buildControls(status, doctor) {
+function buildControls(status, doctor, tuning) {
   return {
     whyTuneNow: status.compactSummary.whyTuneNow,
     whyQueueBlocked: status.compactSummary.whyQueueBlocked,
     whyNotTuneHarder: status.compactSummary.whyNotTuneHarder,
     nextActions: status.nextActions.slice(0, 3).map(compactAction),
-    doctorActions: doctor.recommendedActions.slice(0, 3).map(compactAction)
+    doctorActions: doctor.recommendedActions.slice(0, 3).map(compactAction),
+    tuningPreview: (tuning.tuningPlan?.steps ?? []).slice(0, 3).map(buildPhasePreview)
   };
 }
 
-function buildEvidence(status, doctor) {
+function buildEvidence(status, doctor, tuning) {
+  const tuningComparison = status.benchmarkSummary.tuningComparison ?? {};
+  const cycleWindow = status.benchmarkCycleSummary.windowComparison ?? {};
   return {
     benchmark: {
       cheapestVariant: status.benchmarkSummary.cheapestVariant,
@@ -80,6 +85,14 @@ function buildEvidence(status, doctor) {
       tuningOutcome: status.benchmarkSummary.tuningComparison?.outcome ?? null,
       tuningSummary: status.benchmarkSummary.tuningComparison?.summary ?? null
     },
+    beforeAfter: {
+      cheapestVariantBaseline: tuningComparison.cheapestVariant?.baseline ?? null,
+      cheapestVariantCurrent: tuningComparison.cheapestVariant?.current ?? null,
+      balancedReductionPercentDelta: tuningComparison.balancedReductionPercentDelta ?? null,
+      saverReductionPercentDelta: tuningComparison.saverReductionPercentDelta ?? null,
+      confidence: buildConfidenceCard(tuningComparison.confidence),
+      summary: tuningComparison.summary ?? "No before/after tuning evidence is available yet."
+    },
     cycles: {
       trendDirection: status.benchmarkCycleSummary.trendDirection,
       latestOutcome: status.benchmarkCycleSummary.latestOutcome,
@@ -87,6 +100,21 @@ function buildEvidence(status, doctor) {
       confidence: buildConfidenceCard(status.benchmarkCycleSummary.confidence),
       recommendation: status.benchmarkCycleSummary.recommendation
     },
+    rollback: {
+      canaryStatus: status.tuningSummary.canaryStatus ?? "none",
+      reconciledAt: status.tuningSummary.canaryReconciledAt ?? null,
+      remainingRollbackCount: status.tuningSummary.canaryRemainingRollbackCount ?? 0,
+      recentAppliedPhases: status.tuningSummary.recentAppliedPhases ?? [],
+      primaryReason: status.tuningSummary.canaryReconciliationReasons?.[0] ?? "No rollback or reconcile reason is recorded yet."
+    },
+    cycleWindow: {
+      direction: cycleWindow.direction ?? null,
+      delta: cycleWindow.delta ?? null,
+      currentWindowAverage: cycleWindow.currentWindowAverage ?? null,
+      previousWindowAverage: cycleWindow.previousWindowAverage ?? null,
+      summary: cycleWindow.recommendation ?? "No cycle window comparison is available yet."
+    },
+    tuningPhases: (tuning.tuningPlan?.steps ?? []).slice(0, 3).map(buildPhaseEvidenceCard),
     diagnostics: {
       highestSeverity: doctor.compactSummary.highestSeverity,
       topFinding: doctor.compactSummary.topFinding,
@@ -111,4 +139,53 @@ function compactAction(action) {
     riskLevel: action.riskLevel,
     expectedOutcome: action.expectedOutcome
   };
+}
+
+function buildPhasePreview(step) {
+  return {
+    phase: step.phase,
+    title: step.title,
+    riskLevel: step.riskLevel,
+    whyThisPhase: step.whyThisPhase,
+    expectedImpactSummary: step.expectedImpactSummary,
+    deltaHint: summarizePhaseDeltaHint(step.expectedImpact)
+  };
+}
+
+function buildPhaseEvidenceCard(step) {
+  return {
+    phase: step.phase,
+    riskLevel: step.riskLevel,
+    applyableCount: step.applyableCount,
+    autoApplicableCount: step.autoApplicableCount,
+    expectedImpactSummary: step.expectedImpactSummary,
+    deltaHint: summarizePhaseDeltaHint(step.expectedImpact),
+    whyThisPhase: step.whyThisPhase
+  };
+}
+
+function summarizePhaseDeltaHint(expectedImpact) {
+  const domainCount = Array.isArray(expectedImpact?.domains)
+    ? expectedImpact.domains.length
+    : Array.isArray(expectedImpact?.affectedDomains)
+      ? expectedImpact.affectedDomains.length
+      : 0;
+  const estimatedTokenDelta = Number(expectedImpact?.estimatedTokenDelta) || 0;
+  const thresholdDelta = Array.isArray(expectedImpact?.domains)
+    ? expectedImpact.domains.reduce((total, item) => total + (Number(item.thresholdDelta) || 0), 0)
+    : Number(expectedImpact?.thresholdDelta) || 0;
+
+  if (estimatedTokenDelta > 0 && domainCount > 0) {
+    return `Touches ${domainCount} domain(s) with about ${estimatedTokenDelta} synthetic tokens of expected upside.`;
+  }
+  if (estimatedTokenDelta > 0) {
+    return `Carries about ${estimatedTokenDelta} synthetic tokens of expected upside.`;
+  }
+  if (thresholdDelta > 0 && domainCount > 0) {
+    return `Raises domain gates by about ${thresholdDelta} points across ${domainCount} domain(s).`;
+  }
+  if (thresholdDelta > 0) {
+    return `Raises local thresholds by about ${thresholdDelta} points.`;
+  }
+  return "Expected impact is directional but not yet strong enough for a numeric delta hint.";
 }

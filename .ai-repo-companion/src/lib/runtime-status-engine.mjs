@@ -356,6 +356,11 @@ async function readTuningSummary(rootDir, config = {}) {
   const generatedAt = tuning?.generatedAt ?? null;
   const freshnessMinutes = config.tuning?.autoTuneFreshnessMinutes ?? 720;
   const ageMinutes = ageInMinutes(generatedAt);
+  const recentAppliedPhases = [...new Set(
+    (Array.isArray(tuning?.applied) ? tuning.applied : [])
+      .map((item) => item.phase)
+      .filter(Boolean)
+  )];
   return {
     loaded: Boolean(tuning?.generatedAt),
     generatedAt,
@@ -365,7 +370,10 @@ async function readTuningSummary(rootDir, config = {}) {
     appliedCount: Array.isArray(tuning?.applied) ? tuning.applied.length : 0,
     blockedCount: Array.isArray(tuning?.blocked) ? tuning.blocked.length : 0,
     canaryStatus: tuning?.canary?.status ?? null,
-    canaryReconciledAt: tuning?.canary?.reconciledAt ?? null
+    canaryReconciledAt: tuning?.canary?.reconciledAt ?? null,
+    canaryRemainingRollbackCount: tuning?.canary?.reconciliation?.remainingRollbackCount ?? 0,
+    canaryReconciliationReasons: tuning?.canary?.reconciliation?.reasons ?? [],
+    recentAppliedPhases
   };
 }
 
