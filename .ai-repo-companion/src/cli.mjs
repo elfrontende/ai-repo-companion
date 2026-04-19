@@ -208,7 +208,7 @@ async function runTune(args) {
     tuning: args.auto
       ? await runAutoPolicyTuning(rootDir, { phase: args.phase })
       : (args.reconcile
-        ? await reconcileAutoPolicyTuning(rootDir)
+        ? await reconcileAutoPolicyTuning(rootDir, { phase: args.phase })
       : (args.apply
         ? await applyPolicyTuning(rootDir, { phase: args.phase })
         : await analyzePolicyTuning(rootDir, { phase: args.phase })))

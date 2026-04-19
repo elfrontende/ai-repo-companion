@@ -960,6 +960,99 @@ assert.equal(rolledBackTuning.canary.status, "rolled-back");
 const rolledBackState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-tune-state.json"), {});
 assert.ok(rolledBackState.lastAppliedById["domain-tighten-value-gate-docs"]);
 
+const phaseRollbackRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-phase-rollback-"));
+await fs.cp(path.resolve("config"), path.join(phaseRollbackRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(phaseRollbackRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(phaseRollbackRoot, "state"), { recursive: true });
+await ensureWorkspace(phaseRollbackRoot);
+await writeJson(path.join(phaseRollbackRoot, "state/reviews/metrics.json"), await readJson(path.join(autoTuneRoot, "state/reviews/metrics.json"), {}));
+await writeJson(path.join(phaseRollbackRoot, "state/benchmarks/last-benchmark.json"), await readJson(path.join(phaseTuneRoot, "state/benchmarks/last-benchmark.json"), {}));
+const phaseRollbackConfigPath = path.join(phaseRollbackRoot, "config/system.json");
+const phaseRollbackConfig = await readJson(phaseRollbackConfigPath, {});
+phaseRollbackConfig.tuning.cooldownMinutes = 0;
+phaseRollbackConfig.tuning.maxAutoApplySuggestionsPerRun = 3;
+phaseRollbackConfig.tuning.autoApplySuggestionIds = [
+  "domain-tighten-value-gate-docs",
+  "domain-tighten-value-gate-deploy",
+  "benchmark-lower-balanced-effort"
+];
+await writeJson(phaseRollbackConfigPath, phaseRollbackConfig);
+const phaseRollbackAutoTune = await runAutoPolicyTuning(phaseRollbackRoot);
+assert.ok(phaseRollbackAutoTune.applied.some((item) => item.phase === "cheap-domains"));
+assert.ok(phaseRollbackAutoTune.applied.some((item) => item.phase === "balanced-lane"));
+await writeJson(path.join(phaseRollbackRoot, "state/benchmarks/last-benchmark.json"), {
+  generatedAt: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
+  aggregate: {
+    taskCount: 5,
+    cheapestVariant: "balanced",
+    byDomain: {
+      docs: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 34.1 },
+          balanced: { reductionPercent: 30.4 }
+        }
+      },
+      deploy: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 32.5 },
+          balanced: { reductionPercent: 28.1 }
+        }
+      },
+      ui: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 35.2 },
+          balanced: { reductionPercent: 31.6 }
+        }
+      },
+      testing: {
+        cheapestVariant: "balanced",
+        byVariant: {
+          saver: { reductionPercent: 33.7 },
+          balanced: { reductionPercent: 29.3 }
+        }
+      }
+    },
+    byVariant: {
+      saver: {
+        totalTokens: 5200,
+        tokensSaved: 2800,
+        reductionPercent: 35.5
+      },
+      balanced: {
+        totalTokens: 5600,
+        tokensSaved: 2400,
+        reductionPercent: 30.75
+      },
+      strict: {
+        totalTokens: 6400,
+        tokensSaved: 1600,
+        reductionPercent: 20
+      }
+    }
+  }
+});
+const phaseRollbackBalanced = await reconcileAutoPolicyTuning(phaseRollbackRoot, { phase: "balanced-lane" });
+assert.equal(phaseRollbackBalanced.selectedPhase, "balanced-lane");
+assert.equal(phaseRollbackBalanced.remainingRollbackCount, 2);
+assert.equal(phaseRollbackBalanced.rolledBack.every((item) => item.id === "benchmark-lower-balanced-effort"), true);
+const phaseRollbackConfigAfterBalanced = await readJson(phaseRollbackConfigPath, {});
+assert.equal(phaseRollbackConfigAfterBalanced.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "medium");
+assert.equal(phaseRollbackConfigAfterBalanced.reviewExecution.valueGate.minScoreByDomain.docs, 65);
+const phaseRollbackTuningAfterBalanced = await readJson(path.join(phaseRollbackRoot, "state/tuning/last-tuning.json"), {});
+assert.equal(phaseRollbackTuningAfterBalanced.canary.status, "pending");
+assert.equal(phaseRollbackTuningAfterBalanced.canary.rollbackPlan.length, 2);
+const phaseRollbackCheap = await reconcileAutoPolicyTuning(phaseRollbackRoot, { phase: "cheap-domains" });
+assert.equal(phaseRollbackCheap.selectedPhase, "cheap-domains");
+assert.equal(phaseRollbackCheap.remainingRollbackCount, 0);
+const phaseRollbackConfigAfterCheap = await readJson(phaseRollbackConfigPath, {});
+assert.equal(phaseRollbackConfigAfterCheap.reviewExecution.valueGate.minScoreByDomain.docs, undefined);
+assert.equal(phaseRollbackConfigAfterCheap.reviewExecution.valueGate.minScoreByDomain.deploy, undefined);
+const phaseRollbackTuningAfterCheap = await readJson(path.join(phaseRollbackRoot, "state/tuning/last-tuning.json"), {});
+assert.equal(phaseRollbackTuningAfterCheap.canary.status, "rolled-back");
+
 const priorityTuneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-priority-tune-"));
 await fs.cp(path.resolve("config"), path.join(priorityTuneRoot, "config"), { recursive: true });
 await fs.cp(path.resolve("notes"), path.join(priorityTuneRoot, "notes"), { recursive: true });
