@@ -1242,6 +1242,8 @@ assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].liveTokensUsed,
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].saverTrendStreak, 3);
 assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
 assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
+assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].domain, "docs");
+assert.equal(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].domain, "docs");
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
