@@ -214,6 +214,7 @@ Daily ergonomics are better now too:
 - `status` and `doctor` now also return compact summary blocks like `whyExpensive`, `whyTuneNow`, and `whyQueueBlocked`, so the operator can scan the control-plane state without reading the full diagnostics tree
 - those compact summaries now also explain `whySkipped` and `whyLiveReview`, so an operator can tell whether the runtime is currently saving cost via local gates or still spending mostly on justified live review paths
 - `report` packages the same runtime signals into `overview`, `economics`, `controls`, and `evidence`, so daily operator checks do not require walking multiple command trees
+- `report` now also includes a tiny `compactSummary` block with one health line, one economics line, one controls line, and one evidence line, so a daily operator pass can read the runtime in four short sentences before opening the deeper cards
 - `report --format html` writes a lightweight static HTML snapshot to `state/reports/runtime-report.html`, so the same operator view can be shared or opened in a browser without building a dashboard
 - `report` now also includes compact `beforeAfter`, `rollback`, and per-phase `tuningPhases` evidence cards, so an operator can see what changed, what was rolled back, and which tuning phase is supposed to move the economics next
 - `report` now also includes a `longRun` evidence card, so the operator can see the recent benchmark-cycle trend, window comparison, and confidence in one short block instead of reconstructing it from raw cycle history
