@@ -36,6 +36,7 @@ import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
+import { buildRuntimeReport } from "../src/lib/runtime-report-engine.mjs";
 import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "../src/lib/benchmark-engine.mjs";
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
@@ -1494,6 +1495,15 @@ assert.ok(typeof runtimeDoctor.recommendedActions[0].expectedOutcome === "string
 assert.equal(runtimeDoctor.compactSummary.highestSeverity, "info");
 assert.ok(typeof runtimeDoctor.compactSummary.topFinding === "string");
 assert.ok(typeof runtimeDoctor.compactSummary.whyExpensive === "string");
+
+const runtimeReport = await buildRuntimeReport(statusRoot, statusConfig);
+assert.equal(runtimeReport.overview.queue.queued, 1);
+assert.equal(runtimeReport.overview.confidence.benchmark.level, "high");
+assert.equal(runtimeReport.overview.confidence.cycles.level, "high");
+assert.equal(runtimeReport.economics.topWasteDomains[0].domain, "docs");
+assert.equal(runtimeReport.controls.nextActions[0].action, "node src/cli.mjs tune --auto");
+assert.equal(runtimeReport.evidence.cycles.windowDirection, "improving");
+assert.equal(runtimeReport.evidence.diagnostics.highestSeverity, "info");
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
