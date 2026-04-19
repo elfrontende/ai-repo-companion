@@ -703,8 +703,10 @@ assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval
 assert.equal(tuningAnalysis.tuningPlan.steps[0].phase, "cheap-domains");
 assert.ok(tuningAnalysis.tuningPlan.steps[0].suggestionIds.includes("domain-tighten-value-gate-docs"));
 assert.equal(tuningAnalysis.tuningPlan.steps[0].expectedImpact.domains[0].domain, "docs");
+assert.match(tuningAnalysis.tuningPlan.steps[0].whyThisPhase, /starts there/i);
 assert.ok(tuningAnalysis.tuningPlan.steps[1].suggestionIds.includes("benchmark-lower-balanced-effort"));
 assert.ok(tuningAnalysis.tuningPlan.steps[1].expectedImpact.estimatedTokenDelta > 0);
+assert.match(tuningAnalysis.tuningPlan.steps[1].whyThisPhase, /extra tokens/i);
 assert.equal(
   tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").expectedImpact.domain,
   "docs"
@@ -1281,10 +1283,13 @@ assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics.find((item) => ite
 assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
 assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
 assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].domain, "docs");
+assert.match(runtimeStatus.benchmarkSummary.topWasteDomains[0].whyRanked, /docs is consuming/i);
 assert.equal(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].domain, "docs");
+assert.match(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].whyRanked, /stable saver streak/i);
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
+assert.ok(typeof runtimeStatus.nextActions[0].whyNow === "string");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
 
 const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
@@ -1295,6 +1300,7 @@ assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "post-tune-benchmark-improved"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-signal-noisy-ui"));
 assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune --auto");
+assert.ok(typeof runtimeDoctor.recommendedActions[0].whyNow === "string");
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
