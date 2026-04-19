@@ -222,6 +222,10 @@ function buildPhaseEvidenceCard(step) {
 function buildWorkflowPreview(phase) {
   return {
     phase: phase.phase,
+    objective: phase.objective,
+    readyState: phase.readyState,
+    gatingReason: phase.gatingReason,
+    expectedDeltaCard: phase.expectedDeltaCard,
     recommendation: phase.recommendation,
     commands: phase.commands,
     recommendedLoop: phase.recommendedLoop
