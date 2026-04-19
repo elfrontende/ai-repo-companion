@@ -217,6 +217,7 @@ This is the operator-facing layer: fewer manual file inspections, more direct an
 Synthetic validation is built in too:
 
 - `node src/cli.mjs benchmark` runs a small local suite of tasks with mixed difficulty
+- benchmark also supports `--suite low-risk` and `--suite high-risk`, so cheap domains and risky domains can be validated separately without mixing their trend history
 - `node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns` runs a longer local canary loop, optionally auto-tuning between benchmark passes
 - each sample compares `saver`, `balanced`, and `strict` system variants against a naive `baseline` that always drags the full note set
 - reports are written to `state/benchmarks/last-benchmark.json`
