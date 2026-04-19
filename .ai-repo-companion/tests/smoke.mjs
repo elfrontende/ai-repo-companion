@@ -702,7 +702,13 @@ assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-bud
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
 assert.equal(tuningAnalysis.tuningPlan.steps[0].phase, "cheap-domains");
 assert.ok(tuningAnalysis.tuningPlan.steps[0].suggestionIds.includes("domain-tighten-value-gate-docs"));
+assert.equal(tuningAnalysis.tuningPlan.steps[0].expectedImpact.domains[0].domain, "docs");
 assert.ok(tuningAnalysis.tuningPlan.steps[1].suggestionIds.includes("benchmark-lower-balanced-effort"));
+assert.ok(tuningAnalysis.tuningPlan.steps[1].expectedImpact.estimatedTokenDelta > 0);
+assert.equal(
+  tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").expectedImpact.domain,
+  "docs"
+);
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
 assert.ok(tuningApply.applied.length >= 8);

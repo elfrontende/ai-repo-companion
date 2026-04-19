@@ -233,6 +233,7 @@ Policy tuning is now metrics-aware:
 
 - `node src/cli.mjs tune` reads local review metrics and proposes bounded config changes
 - tune analysis now also returns a small ordered `tuningPlan`, so cheap-domain fixes are sequenced before broader balanced-lane or global policy changes
+- tuning suggestions and tuning-plan steps now also include small `expectedImpact` previews, so the operator can see which domains or token deltas each bounded change is targeting
 - `node src/cli.mjs tune --apply` writes only the safe, auto-apply suggestions back into `config/system.json`
 - `node src/cli.mjs tune --auto` applies only the narrower allowlisted suggestions, respects a cooldown, and records local tuning history in `state/tuning/`
 - auto-tune now also respects `maxAutoApplySuggestionsPerRun`, so it can spend its bounded tuning budget on the most valuable changes first
