@@ -1165,6 +1165,34 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
         reductionPercent: 38.75
       }
     }
+  },
+  trend: {
+    byDomain: {
+      docs: {
+        cheapestVariantStreak: {
+          variant: "saver",
+          count: 3
+        }
+      },
+      deploy: {
+        cheapestVariantStreak: {
+          variant: "saver",
+          count: 1
+        }
+      },
+      ui: {
+        cheapestVariantStreak: {
+          variant: "balanced",
+          count: 2
+        }
+      },
+      testing: {
+        cheapestVariantStreak: {
+          variant: "saver",
+          count: 1
+        }
+      }
+    }
   }
 });
 await writeJson(path.join(statusRoot, "state/tuning/last-tuning.json"), {
@@ -1189,6 +1217,8 @@ assert.equal(runtimeStatus.benchmarkSummary.cheapestVariant, "saver");
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].domain, "docs");
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].shouldTightenValueGate, true);
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].liveTokensUsed, 12000);
+assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].saverTrendStreak, 3);
+assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
@@ -1272,6 +1302,9 @@ assert.ok(benchmarkReport.aggregate.byDomain.deploy.byVariant.saver.totalTokens 
 assert.equal(benchmarkReport.trend.historyEntries, 3);
 assert.equal(benchmarkReport.trend.cheapestVariantStreak.variant, "saver");
 assert.equal(benchmarkReport.trend.cheapestVariantStreak.count, 3);
+assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.variant, "saver");
+assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.count, 3);
+assert.ok(typeof benchmarkReport.trend.byDomain.deploy.deltaByVariant.saver.totalTokensDelta === "number");
 assert.match(benchmarkReport.trend.recommendation, /Saver has been the cheapest variant/i);
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
 assert.equal(benchmarkHistory.trim().split("\n").length, 3);

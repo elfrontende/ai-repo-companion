@@ -217,6 +217,7 @@ Synthetic validation is built in too:
 - reports are written to `state/benchmarks/last-benchmark.json`
 - benchmark history is appended to `state/benchmarks/history.jsonl`, trimmed by retention, and summarized into a trend block with cheapest-variant streaks and simple recommendations
 - benchmark aggregate data now also includes `byDomain`, so cheaper lanes can be evaluated per domain instead of only through one global total
+- the trend block now also persists per-domain cheapest-variant streaks, so tuning can distinguish a stable `docs` cost problem from one noisy benchmark run
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 
@@ -233,6 +234,7 @@ Policy tuning is now metrics-aware:
 - canary rollback can now watch configured low-risk domains like `docs`, `deploy`, `ui`, and `testing`, so heavy `security` work does not hide regressions in the cheaper balanced lane
 - those same cheap domains can now generate bounded `minScoreByDomain` tuning suggestions, so `tune` can tighten only the low-risk balanced lane instead of making one global value-gate jump
 - when several cheap-domain suggestions compete, auto-tune now ranks them by domain token pressure and benchmark reduction gap, so the noisiest expensive domain gets tightened first
+- cheap-domain tightening now also waits for a repeated saver streak in the domain trend, so one lucky synthetic run does not immediately harden a low-risk lane
 
 This keeps policy iteration lightweight: collect local evidence first, then nudge the config instead of re-guessing thresholds by hand.
 

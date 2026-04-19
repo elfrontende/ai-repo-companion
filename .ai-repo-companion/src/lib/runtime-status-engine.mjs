@@ -137,7 +137,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     findings.push({
       severity: "info",
       code: `domain-value-gate-drift-${item.domain}`,
-      message: `${item.domain} still favors saver by ${item.reductionGap.toFixed(2)} points, but its configured value-gate threshold is only ${item.configuredThreshold}. Consider ${item.suggestedThreshold} for this low-risk domain.`
+      message: `${item.domain} has favored saver for ${item.saverTrendStreak} benchmark runs and still leads by ${item.reductionGap.toFixed(2)} points, but its configured value-gate threshold is only ${item.configuredThreshold}. Consider ${item.suggestedThreshold} for this low-risk domain.`
     });
   }
 
@@ -204,7 +204,8 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
     cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
     saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
-    domainDiagnostics
+    domainDiagnostics,
+    domainTrend: benchmark?.trend?.byDomain ?? {}
   };
 }
 
@@ -266,8 +267,10 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
       const storedThreshold = config.reviewExecution?.valueGate?.minScoreByDomain?.[domain];
       const configuredThreshold = Number(storedThreshold) || globalThreshold;
       const suggestedThreshold = Math.min(90, globalThreshold + 5);
+      const saverTrendStreak = Number(benchmark?.trend?.byDomain?.[domain]?.cheapestVariantStreak?.count) || 0;
       const shouldTightenValueGate = summary?.cheapestVariant === "saver"
         && reductionGap >= 4
+        && saverTrendStreak >= 2
         && configuredThreshold < suggestedThreshold;
 
       return {
@@ -276,6 +279,7 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
         saverReductionPercent: saverReduction,
         balancedReductionPercent: balancedReduction,
         reductionGap,
+        saverTrendStreak,
         configuredThreshold,
         suggestedThreshold,
         liveTokensUsed: Number(tokenMap[domain]) || 0,
