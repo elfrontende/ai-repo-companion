@@ -206,12 +206,12 @@ async function runTune(args) {
     rootDir,
     mode: "tune",
     tuning: args.auto
-      ? await runAutoPolicyTuning(rootDir)
+      ? await runAutoPolicyTuning(rootDir, { phase: args.phase })
       : (args.reconcile
         ? await reconcileAutoPolicyTuning(rootDir)
       : (args.apply
-        ? await applyPolicyTuning(rootDir)
-        : await analyzePolicyTuning(rootDir)))
+        ? await applyPolicyTuning(rootDir, { phase: args.phase })
+        : await analyzePolicyTuning(rootDir, { phase: args.phase })))
   };
 }
 
@@ -357,8 +357,11 @@ function helpText() {
       "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
+      "node src/cli.mjs tune --phase cheap-domains",
       "node src/cli.mjs tune --apply",
+      "node src/cli.mjs tune --apply --phase balanced-lane",
       "node src/cli.mjs tune --auto",
+      "node src/cli.mjs tune --auto --phase cheap-domains",
       "node src/cli.mjs tune --reconcile",
       "node src/cli.mjs review --maxJobs 1",
       "node src/cli.mjs review --jobId memjob-123 --live",

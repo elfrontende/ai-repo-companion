@@ -709,6 +709,10 @@ assert.equal(
   tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").expectedImpact.domain,
   "docs"
 );
+const phaseOnlyAnalysis = await analyzePolicyTuning(tuningRoot, { phase: "cheap-domains" });
+assert.equal(phaseOnlyAnalysis.selectedPhase, "cheap-domains");
+assert.equal(phaseOnlyAnalysis.suggestions.every((item) => item.id.startsWith("domain-tighten-value-gate-")), true);
+assert.equal(phaseOnlyAnalysis.tuningPlan.steps.length, 1);
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
 assert.ok(tuningApply.applied.length >= 8);
@@ -857,6 +861,21 @@ const autoTuneState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-
 assert.ok(autoTuneState.lastAppliedById["domain-tighten-value-gate-docs"]);
 const autoTuneHistory = await fs.readFile(path.join(autoTuneRoot, "state/tuning/history.jsonl"), "utf8");
 assert.match(autoTuneHistory, /domain-tighten-value-gate-docs/);
+
+const phaseTuneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-phase-tune-"));
+await fs.cp(path.resolve("config"), path.join(phaseTuneRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(phaseTuneRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(phaseTuneRoot, "state"), { recursive: true });
+await ensureWorkspace(phaseTuneRoot);
+await writeJson(path.join(phaseTuneRoot, "state/reviews/metrics.json"), await readJson(path.join(autoTuneRoot, "state/reviews/metrics.json"), {}));
+await writeJson(path.join(phaseTuneRoot, "state/benchmarks/last-benchmark.json"), await readJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"), {}));
+const phaseTuneConfig = await readJson(path.join(phaseTuneRoot, "config/system.json"), {});
+phaseTuneConfig.tuning.cooldownMinutes = 0;
+phaseTuneConfig.tuning.maxAutoApplySuggestionsPerRun = 5;
+await writeJson(path.join(phaseTuneRoot, "config/system.json"), phaseTuneConfig);
+const cheapPhaseAutoTune = await runAutoPolicyTuning(phaseTuneRoot, { phase: "cheap-domains" });
+assert.equal(cheapPhaseAutoTune.selectedPhase, "cheap-domains");
+assert.equal(cheapPhaseAutoTune.applied.every((item) => item.id.startsWith("domain-tighten-value-gate-")), true);
 
 const autoTuningSecond = await runAutoPolicyTuning(autoTuneRoot);
 assert.equal(autoTuningSecond.applied.length, 4);
