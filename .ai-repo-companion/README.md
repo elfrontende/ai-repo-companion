@@ -240,6 +240,7 @@ Synthetic validation is built in too:
 - benchmark cycles now also persist their own report/history files and produce a short `multiCycle` summary, so several recent cycle runs can be compared instead of treating each loop as an isolated snapshot
 - benchmark trends, tuning comparisons, and cycle summaries now also include a small local `confidence` block, so the control plane can tell the difference between stable economic evidence and thin or noisy synthetic signal
 - `multiCycle` now also includes a small window-to-window comparison, so the control plane can tell whether the latest cycle window is truly improving over the previous one instead of only reporting a local streak
+- `multiCycle` now also keeps a short window-history trail and a `stableWindowDirection`, so long-run evidence can distinguish one lucky comparison from repeated improving or degrading windows
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 

@@ -757,6 +757,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
     degradedCount: outcomeCounts.degraded ?? 0
   });
   const windowComparison = buildCycleWindowComparison(entries, comparisonWindow);
+  const windowHistory = buildCycleWindowHistory(entries, comparisonWindow);
   const confidence = buildBenchmarkCycleConfidence({
     recentCycleCount: summaries.length,
     latestOutcomeStreak,
@@ -778,6 +779,8 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
     outcomeCounts,
     trendDirection,
     windowComparison,
+    windowHistory,
+    stableWindowDirection: resolveStableWindowDirection(windowHistory),
     confidence,
     recommendation: buildCycleTrendRecommendation({
       trendDirection,
@@ -821,6 +824,59 @@ function buildCycleWindowComparison(entries, comparisonWindow) {
     direction,
     recommendation: buildCycleWindowRecommendation(direction, delta, windowSize)
   };
+}
+
+function buildCycleWindowHistory(entries, comparisonWindow) {
+  const windowSize = Math.max(1, Number(comparisonWindow) || 2);
+  const minWindowEnd = windowSize * 2;
+  const comparisons = [];
+  for (let end = minWindowEnd; end <= entries.length; end += 1) {
+    const currentWindow = entries.slice(end - windowSize, end);
+    const previousWindow = entries.slice(end - (windowSize * 2), end - windowSize);
+    if (currentWindow.length < windowSize || previousWindow.length < windowSize) {
+      continue;
+    }
+
+    const currentAverage = averageCycleOutcomeMetric(currentWindow);
+    const previousAverage = averageCycleOutcomeMetric(previousWindow);
+    const delta = toFixedDelta(currentAverage, previousAverage);
+    const direction = Number.isFinite(delta) && delta >= 1
+      ? "improving"
+      : Number.isFinite(delta) && delta <= -1
+        ? "degrading"
+        : "flat";
+
+    comparisons.push({
+      generatedAt: currentWindow.at(-1)?.generatedAt ?? null,
+      windowSize,
+      direction,
+      delta,
+      currentWindowAverage: currentAverage,
+      previousWindowAverage: previousAverage
+    });
+  }
+
+  const recent = comparisons.slice(-5);
+  return {
+    available: recent.length > 0,
+    count: recent.length,
+    items: recent
+  };
+}
+
+function resolveStableWindowDirection(windowHistory) {
+  if (!windowHistory?.available || (windowHistory.items?.length ?? 0) < 2) {
+    return null;
+  }
+  const directions = windowHistory.items
+    .map((item) => item.direction)
+    .filter((value) => value && value !== "flat");
+  if (directions.length < 2) {
+    return null;
+  }
+  const latest = directions.at(-1);
+  const previous = directions.at(-2);
+  return latest === previous ? latest : null;
 }
 
 function averageCycleOutcomeMetric(entries) {

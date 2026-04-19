@@ -136,10 +136,15 @@ function buildEvidence(status, doctor, tuning) {
       latestOutcomeStreak: status.benchmarkCycleSummary.latestOutcomeStreak,
       averageBalancedDelta: status.benchmarkCycleSummary.averageBalancedDelta,
       averageRollbackCount: status.benchmarkCycleSummary.averageRollbackCount,
+      stableWindowDirection: multiCycle.stableWindowDirection ?? null,
       windowComparison: {
         direction: cycleWindow.direction ?? null,
         delta: cycleWindow.delta ?? null,
         summary: cycleWindow.recommendation ?? "No cycle window comparison is available yet."
+      },
+      windowHistory: {
+        count: multiCycle.windowHistory?.count ?? 0,
+        items: (multiCycle.windowHistory?.items ?? []).slice(-3)
       },
       confidence: buildConfidenceCard(status.benchmarkCycleSummary.confidence),
       summary: buildLongRunSummary(status.benchmarkCycleSummary)
@@ -229,12 +234,13 @@ function buildLongRunSummary(benchmarkCycleSummary) {
   const averageBalancedDelta = Number(benchmarkCycleSummary.averageBalancedDelta) || 0;
   const latestOutcomeStreak = Number(benchmarkCycleSummary.latestOutcomeStreak) || 0;
   const confidence = benchmarkCycleSummary.confidence?.level ?? "low";
+  const stableWindowDirection = benchmarkCycleSummary.multiCycle?.stableWindowDirection ?? null;
 
   if (trendDirection === "improving") {
-    return `Long-run cycle evidence is ${confidence} confidence and improving, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} across the recent window and a streak of ${latestOutcomeStreak}.`;
+    return `Long-run cycle evidence is ${confidence} confidence and improving, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} across the recent window, a streak of ${latestOutcomeStreak}, and ${stableWindowDirection === "improving" ? "repeated improving window comparisons." : "at least one recent improving window comparison."}`;
   }
   if (trendDirection === "degrading") {
-    return `Long-run cycle evidence is ${confidence} confidence and degrading, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} and a streak of ${latestOutcomeStreak}.`;
+    return `Long-run cycle evidence is ${confidence} confidence and degrading, with an average balanced delta of ${averageBalancedDelta.toFixed(2)}, a streak of ${latestOutcomeStreak}, and ${stableWindowDirection === "degrading" ? "repeated degrading window comparisons." : "at least one recent degrading window comparison."}`;
   }
   return `Long-run cycle evidence is ${confidence} confidence and still mixed, so recent benchmark windows should be treated as directional rather than conclusive.`;
 }
@@ -389,6 +395,11 @@ function renderRuntimeReportHtml(report) {
           <div class="eyebrow">Long Run</div>
           <div class="metric">${escapeHtml(report.evidence.longRun.confidence.level)}</div>
           <div>${escapeHtml(report.evidence.longRun.summary)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Window Compare</div>
+          <div class="metric">${escapeHtml(report.evidence.longRun.stableWindowDirection ?? report.evidence.cycleWindow.direction ?? "mixed")}</div>
+          <div>${escapeHtml(report.evidence.cycleWindow.summary)}</div>
         </article>
         <article class="card">
           <div class="eyebrow">Rollback</div>
