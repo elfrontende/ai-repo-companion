@@ -832,23 +832,27 @@ await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"),
 
 const autoTuningFirst = await runAutoPolicyTuning(autoTuneRoot);
 assert.equal(autoTuningFirst.enabled, true);
-assert.ok(autoTuningFirst.applied.length >= 5);
-assert.ok(autoTuningFirst.applied.some((item) => item.id === "tighten-value-gate"));
-assert.ok(autoTuningFirst.applied.some((item) => item.id === "benchmark-lower-balanced-effort"));
+assert.equal(autoTuningFirst.maxAutoApplySuggestionsPerRun, 4);
+assert.ok(autoTuningFirst.applied.length <= 4);
+assert.ok(autoTuningFirst.applied.length >= 4);
 assert.ok(autoTuningFirst.applied.some((item) => item.id === "domain-tighten-value-gate-docs"));
+assert.ok(autoTuningFirst.applied.some((item) => item.id === "domain-tighten-value-gate-deploy"));
 const autoTunedConfig = await readJson(path.join(autoTuneRoot, "config/system.json"), {});
-assert.equal(autoTunedConfig.reviewExecution.valueGate.minScore, 65);
 assert.equal(autoTunedConfig.reviewExecution.valueGate.minScoreByDomain.docs, 65);
-assert.equal(autoTunedConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "low");
+assert.equal(autoTunedConfig.reviewExecution.valueGate.minScoreByDomain.deploy, 65);
+assert.equal(autoTunedConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "medium");
+assert.ok(autoTuningFirst.blocked.some((item) => item.id === "tighten-value-gate" && item.reason === "auto-apply-budget-exhausted"));
 
 const autoTuneState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-tune-state.json"), {});
-assert.ok(autoTuneState.lastAppliedById["tighten-value-gate"]);
+assert.ok(autoTuneState.lastAppliedById["domain-tighten-value-gate-docs"]);
 const autoTuneHistory = await fs.readFile(path.join(autoTuneRoot, "state/tuning/history.jsonl"), "utf8");
-assert.match(autoTuneHistory, /benchmark-lower-balanced-effort/);
+assert.match(autoTuneHistory, /domain-tighten-value-gate-docs/);
 
 const autoTuningSecond = await runAutoPolicyTuning(autoTuneRoot);
-assert.equal(autoTuningSecond.applied.length, 0);
-assert.ok(autoTuningSecond.blocked.some((item) => item.id === "tighten-value-gate"));
+assert.equal(autoTuningSecond.applied.length, 4);
+assert.ok(autoTuningSecond.applied.some((item) => item.id === "tighten-value-gate"));
+assert.ok(autoTuningSecond.applied.some((item) => item.id === "benchmark-lower-balanced-effort"));
+assert.ok(autoTuningSecond.blocked.some((item) => item.id === "domain-tighten-value-gate-docs" && item.reason === "cooldown-active"));
 
 await writeJson(path.join(autoTuneRoot, "state/benchmarks/last-benchmark.json"), {
   generatedAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -918,12 +922,107 @@ assert.ok(reconcileResult.rolledBack.some((item) => item.id === "tighten-value-g
 assert.ok(reconcileResult.reasons.some((reason) => /cheapest variant changed/i.test(reason)));
 const rolledBackConfig = await readJson(path.join(autoTuneRoot, "config/system.json"), {});
 assert.equal(rolledBackConfig.reviewExecution.valueGate.minScore, 60);
-assert.equal(rolledBackConfig.reviewExecution.valueGate.minScoreByDomain.docs, undefined);
+assert.equal(rolledBackConfig.reviewExecution.valueGate.minScoreByDomain.docs, 65);
 assert.equal(rolledBackConfig.reviewExecution.reviewProfiles.balanced.codexReasoningEffort, "medium");
 const rolledBackTuning = await readJson(path.join(autoTuneRoot, "state/tuning/last-tuning.json"), {});
 assert.equal(rolledBackTuning.canary.status, "rolled-back");
 const rolledBackState = await readJson(path.join(autoTuneRoot, "state/tuning/auto-tune-state.json"), {});
-assert.equal(rolledBackState.lastAppliedById["tighten-value-gate"], undefined);
+assert.ok(rolledBackState.lastAppliedById["domain-tighten-value-gate-docs"]);
+
+const priorityTuneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-priority-tune-"));
+await fs.cp(path.resolve("config"), path.join(priorityTuneRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(priorityTuneRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(priorityTuneRoot, "state"), { recursive: true });
+await ensureWorkspace(priorityTuneRoot);
+
+const priorityConfigPath = path.join(priorityTuneRoot, "config/system.json");
+const priorityConfig = await readJson(priorityConfigPath, {});
+priorityConfig.tuning.maxAutoApplySuggestionsPerRun = 1;
+priorityConfig.tuning.canaryDomains = ["docs", "deploy"];
+priorityConfig.tuning.autoApplySuggestionIds = [
+  "domain-tighten-value-gate-docs",
+  "domain-tighten-value-gate-deploy"
+];
+await writeJson(priorityConfigPath, priorityConfig);
+
+await writeJson(path.join(priorityTuneRoot, "state/reviews/metrics.json"), {
+  schemaVersion: 2,
+  updatedAt: "2026-04-18T05:00:00.000Z",
+  counters: {
+    processedJobs: 2,
+    completedJobs: 2,
+    failedJobs: 0,
+    skippedJobs: 0,
+    awaitingApprovalJobs: 0,
+    approvalsApplied: 0,
+    approvalsExpiredRequeued: 0,
+    approvalsExpiredClosed: 0,
+    recoveredRuns: 0,
+    noteApplyRuns: 1,
+    selectedOperations: 2,
+    appliedOperations: 2,
+    skippedOperations: 0,
+    rejectedOperations: 0,
+    deferredOperations: 0
+  },
+  cost: {
+    liveTokensUsed: 26000,
+    estimatedContextTokens: 800,
+    liveRunsWithUsage: 2
+  },
+  latencies: {
+    queueMinutes: { count: 2, total: 20, max: 10, last: 10 },
+    approvalMinutes: { count: 0, total: 0, max: 0, last: 0 }
+  },
+  byAdapter: { "codex-native": 2 },
+  byMode: { balanced: 2 },
+  tokensByDomain: {
+    docs: 18000,
+    deploy: 6000
+  },
+  recentEvents: []
+});
+
+await writeJson(path.join(priorityTuneRoot, "state/benchmarks/last-benchmark.json"), {
+  generatedAt: "2026-04-18T05:10:00.000Z",
+  aggregate: {
+    taskCount: 2,
+    cheapestVariant: "saver",
+    byDomain: {
+      docs: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 52.1 },
+          balanced: { reductionPercent: 43.2 }
+        }
+      },
+      deploy: {
+        cheapestVariant: "saver",
+        byVariant: {
+          saver: { reductionPercent: 48.4 },
+          balanced: { reductionPercent: 43.1 }
+        }
+      }
+    },
+    byVariant: {
+      saver: { totalTokens: 3000, tokensSaved: 2000, reductionPercent: 40 },
+      balanced: { totalTokens: 3600, tokensSaved: 1400, reductionPercent: 28 }
+    }
+  }
+});
+
+const priorityAnalysis = await analyzePolicyTuning(priorityTuneRoot);
+const docsSuggestion = priorityAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs");
+const deploySuggestion = priorityAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-deploy");
+assert.ok(docsSuggestion.priority > deploySuggestion.priority);
+
+const priorityAutoTune = await runAutoPolicyTuning(priorityTuneRoot);
+assert.equal(priorityAutoTune.applied.length, 1);
+assert.equal(priorityAutoTune.applied[0].id, "domain-tighten-value-gate-docs");
+assert.ok(priorityAutoTune.blocked.some((item) => item.id === "domain-tighten-value-gate-deploy" && item.reason === "auto-apply-budget-exhausted"));
+const priorityTunedConfig = await readJson(priorityConfigPath, {});
+assert.equal(priorityTunedConfig.reviewExecution.valueGate.minScoreByDomain.docs, 65);
+assert.equal(priorityTunedConfig.reviewExecution.valueGate.minScoreByDomain.deploy, undefined);
 
 const lockRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-lock-"));
 await fs.cp(path.resolve("config"), path.join(lockRoot, "config"), { recursive: true });

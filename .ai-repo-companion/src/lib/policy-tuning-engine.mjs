@@ -87,16 +87,27 @@ export async function runAutoPolicyTuning(rootDir) {
   }
 
   const cooldownMinutes = Number(tuningConfig.cooldownMinutes) || 720;
+  const maxAutoApplySuggestionsPerRun = Number(tuningConfig.maxAutoApplySuggestionsPerRun) || 4;
   const autoIds = new Set(tuningConfig.autoApplySuggestionIds ?? []);
   const candidates = analysis.suggestions.map((suggestion) => ({
     ...suggestion,
     canAutoApply: suggestion.canApply && autoIds.has(suggestion.id)
-  }));
+  })).sort(compareAutoTuneSuggestions);
   const blocked = [];
   const applied = [];
+  let autoApplySlotsRemaining = maxAutoApplySuggestionsPerRun;
 
   for (const suggestion of candidates) {
     if (!suggestion.canAutoApply) {
+      continue;
+    }
+
+    if (autoApplySlotsRemaining <= 0) {
+      blocked.push({
+        id: suggestion.id,
+        reason: "auto-apply-budget-exhausted",
+        priority: suggestion.priority ?? 0
+      });
       continue;
     }
 
@@ -116,10 +127,12 @@ export async function runAutoPolicyTuning(rootDir) {
       id: suggestion.id,
       path: suggestion.path,
       previousValue: suggestion.currentValue,
-      proposedValue: suggestion.proposedValue
+      proposedValue: suggestion.proposedValue,
+      priority: suggestion.priority ?? 0
     });
     state.lastAppliedById ??= {};
     state.lastAppliedById[suggestion.id] = now;
+    autoApplySlotsRemaining -= 1;
   }
 
   if (applied.length > 0) {
@@ -131,6 +144,7 @@ export async function runAutoPolicyTuning(rootDir) {
     mode: "auto",
     enabled: true,
     cooldownMinutes,
+    maxAutoApplySuggestionsPerRun,
     applied,
     blocked,
     reconciliation
@@ -153,7 +167,8 @@ export async function runAutoPolicyTuning(rootDir) {
     summary: {
       suggestionCount: analysis.summary.suggestionCount,
       applyableCount: analysis.summary.applyableCount,
-      autoApplicableCount: candidates.filter((item) => item.canAutoApply).length
+      autoApplicableCount: candidates.filter((item) => item.canAutoApply).length,
+      maxAutoApplySuggestionsPerRun
     },
     canary: nextCanary,
     applied,
@@ -312,7 +327,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["memoryPolicy", "sameDomainEventThreshold"],
     currentValue: config.memoryPolicy?.sameDomainEventThreshold ?? 3,
     proposedValue: Math.min(8, (config.memoryPolicy?.sameDomainEventThreshold ?? 3) + 1),
-    canAutoApply: true
+    canAutoApply: true,
+    priority: 40
   });
 
   maybePushSuggestion(suggestions, {
@@ -322,7 +338,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "operationRanking", "minScore"],
     currentValue: config.reviewExecution?.operationRanking?.minScore ?? 35,
     proposedValue: Math.min(80, (config.reviewExecution?.operationRanking?.minScore ?? 35) + 5),
-    canAutoApply: true
+    canAutoApply: true,
+    priority: 35
   });
 
   maybePushSuggestion(suggestions, {
@@ -332,7 +349,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "operationRanking", "maxAppliedOperations"],
     currentValue: config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2,
     proposedValue: Math.min(5, (config.reviewExecution?.operationRanking?.maxAppliedOperations ?? 2) + 1),
-    canAutoApply: false
+    canAutoApply: false,
+    priority: 15
   });
 
   maybePushSuggestion(suggestions, {
@@ -342,7 +360,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "approval", "pendingApprovalTtlMinutes"],
     currentValue: config.reviewExecution?.approval?.pendingApprovalTtlMinutes ?? 240,
     proposedValue: Math.min(1440, (config.reviewExecution?.approval?.pendingApprovalTtlMinutes ?? 240) + 60),
-    canAutoApply: false
+    canAutoApply: false,
+    priority: 10
   });
 
   maybePushSuggestion(suggestions, {
@@ -352,7 +371,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "approval", "onExpired"],
     currentValue: config.reviewExecution?.approval?.onExpired ?? "requeue",
     proposedValue: "requeue",
-    canAutoApply: false
+    canAutoApply: false,
+    priority: 10
   });
 
   maybePushSuggestion(suggestions, {
@@ -362,7 +382,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "valueGate", "minScore"],
     currentValue: config.reviewExecution?.valueGate?.minScore ?? 60,
     proposedValue: Math.min(90, (config.reviewExecution?.valueGate?.minScore ?? 60) + 5),
-    canAutoApply: true
+    canAutoApply: true,
+    priority: 60
   });
 
   maybePushSuggestion(suggestions, {
@@ -372,7 +393,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "valueGate", "minScore"],
     currentValue: config.reviewExecution?.valueGate?.minScore ?? 60,
     proposedValue: Math.max(30, (config.reviewExecution?.valueGate?.minScore ?? 60) - 5),
-    canAutoApply: true
+    canAutoApply: true,
+    priority: 45
   });
 
   // Runtime metrics tell us whether the current policy wastes live calls.
@@ -383,7 +405,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
   const saverVariant = benchmark?.aggregate?.byVariant?.saver;
   const domainSignal = buildDomainLeanSignal(
     benchmark?.aggregate?.byDomain ?? {},
-    config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"]
+    config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"],
+    metrics?.tokensByDomain ?? {}
   );
 
   maybePushSuggestion(suggestions, {
@@ -399,7 +422,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "reviewProfiles", "balanced", "codexReasoningEffort"],
     currentValue: config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium",
     proposedValue: "low",
-    canAutoApply: true
+    canAutoApply: true,
+    priority: domainSignal.shouldLeanBalancedLane ? 75 : 50
   });
 
   maybePushSuggestion(suggestions, {
@@ -415,7 +439,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     path: ["reviewExecution", "reviewProfiles", "balanced", "maxOperations"],
     currentValue: config.reviewExecution?.reviewProfiles?.balanced?.maxOperations ?? 2,
     proposedValue: 1,
-    canAutoApply: true
+    canAutoApply: true,
+    priority: domainSignal.shouldLeanBalancedLane ? 78 : 52
   });
 
   for (const domain of domainSignal.matchedDomains) {
@@ -432,15 +457,17 @@ function buildPolicySuggestions(config, metrics, benchmark) {
       path: ["reviewExecution", "valueGate", "minScoreByDomain", domain],
       currentValue: currentStoredValue,
       proposedValue: Math.min(90, effectiveThreshold + 5),
-      canAutoApply: true
+      canAutoApply: true,
+      priority: domainSignal.domainPriorities[domain] ?? 50
     });
   }
 
   return suggestions;
 }
 
-function buildDomainLeanSignal(byDomain, monitoredDomains) {
+function buildDomainLeanSignal(byDomain, monitoredDomains, tokensByDomain) {
   const matchedDomains = [];
+  const domainPriorities = {};
 
   for (const domain of monitoredDomains) {
     const summary = byDomain?.[domain];
@@ -452,11 +479,14 @@ function buildDomainLeanSignal(byDomain, monitoredDomains) {
     const reductionGap = saverReduction - balancedReduction;
     if (summary?.cheapestVariant === "saver" && Number.isFinite(reductionGap) && reductionGap >= 4) {
       matchedDomains.push(domain);
+      const liveTokensUsed = Number(tokensByDomain?.[domain]) || 0;
+      domainPriorities[domain] = Math.round(liveTokensUsed + (reductionGap * 1000));
     }
   }
 
   return {
     matchedDomains,
+    domainPriorities,
     shouldLeanBalancedLane: matchedDomains.length >= Math.max(2, Math.ceil(monitoredDomains.length / 2))
   };
 }
@@ -580,9 +610,18 @@ function maybePushSuggestion(suggestions, suggestion) {
     path: suggestion.path,
     currentValue: suggestion.currentValue,
     proposedValue: suggestion.proposedValue,
+    priority: Number(suggestion.priority) || 0,
     canApply: suggestion.currentValue !== suggestion.proposedValue,
     canAutoApply: suggestion.currentValue !== suggestion.proposedValue && suggestion.canAutoApply === true
   });
+}
+
+function compareAutoTuneSuggestions(left, right) {
+  const priorityDelta = (Number(right.priority) || 0) - (Number(left.priority) || 0);
+  if (priorityDelta !== 0) {
+    return priorityDelta;
+  }
+  return String(left.id).localeCompare(String(right.id));
 }
 
 function applyConfigPatch(config, pathSegments, value) {

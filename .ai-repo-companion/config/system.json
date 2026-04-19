@@ -297,6 +297,7 @@
     "autoApplyEnabled": true,
     "autoRollbackEnabled": true,
     "cooldownMinutes": 720,
+    "maxAutoApplySuggestionsPerRun": 4,
     "benchmarkFreshnessMinutes": 1440,
     "autoTuneFreshnessMinutes": 720,
     "historyRetentionEntries": 100,
