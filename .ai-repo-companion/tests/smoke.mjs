@@ -36,7 +36,7 @@ import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
-import { runSyntheticBenchmark } from "../src/lib/benchmark-engine.mjs";
+import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "../src/lib/benchmark-engine.mjs";
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
@@ -1372,6 +1372,29 @@ assert.ok(benchmarkReport.tuningComparison.balancedReductionPercentDelta > 0);
 assert.equal(benchmarkReport.tuningComparison.byDomain.docs.outcome, "improved");
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
 assert.equal(benchmarkHistory.trim().split("\n").length, 3);
+
+const benchmarkCycleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-benchmark-cycle-"));
+await fs.cp(path.resolve("config"), path.join(benchmarkCycleRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(benchmarkCycleRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(benchmarkCycleRoot, "state"), { recursive: true });
+await ensureWorkspace(benchmarkCycleRoot);
+
+const cycleConfig = await readJson(path.join(benchmarkCycleRoot, "config/system.json"), {});
+cycleConfig.tuning.benchmarkHistoryRetentionEntries = 5;
+cycleConfig.tuning.benchmarkTrendWindow = 3;
+cycleConfig.tuning.autoApplyEnabled = true;
+cycleConfig.tuning.cooldownMinutes = 0;
+cycleConfig.tuning.maxAutoApplySuggestionsPerRun = 2;
+await writeJson(path.join(benchmarkCycleRoot, "config/system.json"), cycleConfig);
+const benchmarkCycle = await runSyntheticBenchmarkCycle(benchmarkCycleRoot, {
+  iterations: 3,
+  autoTuneBetweenRuns: true
+});
+assert.equal(benchmarkCycle.benchmarks.length, 3);
+assert.equal(benchmarkCycle.tuningRuns.length, 2);
+assert.ok(["improved", "flat", "degraded"].includes(benchmarkCycle.summary.outcome));
+assert.ok(typeof benchmarkCycle.summary.recommendation === "string");
+assert.ok(Number.isFinite(benchmarkCycle.summary.tuningRunCount));
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");

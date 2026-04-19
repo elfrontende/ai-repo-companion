@@ -111,6 +111,48 @@ export async function runSyntheticBenchmark(rootDir, config) {
   };
 }
 
+export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
+  const iterations = Math.max(1, Number(options.iterations) || 3);
+  const autoTuneBetweenRuns = options.autoTuneBetweenRuns === true;
+  const benchmarkRuns = [];
+  const tuningRuns = [];
+
+  for (let index = 0; index < iterations; index += 1) {
+    const config = await readJson(path.join(rootDir, "config/system.json"), {});
+    const benchmark = await runSyntheticBenchmark(rootDir, config);
+    benchmarkRuns.push({
+      iteration: index + 1,
+      generatedAt: benchmark.report.generatedAt,
+      cheapestVariant: benchmark.report.aggregate.cheapestVariant,
+      balancedReductionPercent: benchmark.report.aggregate.byVariant?.balanced?.reductionPercent ?? null,
+      saverReductionPercent: benchmark.report.aggregate.byVariant?.saver?.reductionPercent ?? null,
+      tuningComparison: benchmark.report.tuningComparison ?? null
+    });
+
+    if (!autoTuneBetweenRuns || index === iterations - 1) {
+      continue;
+    }
+
+    const { runAutoPolicyTuning } = await import("./policy-tuning-engine.mjs");
+    const tuning = await runAutoPolicyTuning(rootDir);
+    tuningRuns.push({
+      iteration: index + 1,
+      generatedAt: new Date().toISOString(),
+      appliedCount: Array.isArray(tuning.applied) ? tuning.applied.length : 0,
+      blockedCount: Array.isArray(tuning.blocked) ? tuning.blocked.length : 0,
+      reconciliation: tuning.reconciliation ?? null
+    });
+  }
+
+  return {
+    iterations,
+    autoTuneBetweenRuns,
+    benchmarks: benchmarkRuns,
+    tuningRuns,
+    summary: buildBenchmarkCycleSummary(benchmarkRuns, tuningRuns)
+  };
+}
+
 async function buildVariantBenchmark(rootDir, config, notes, sample, variant) {
   const variantConfig = applyReviewCostMode(config, variant);
   const taskProfile = classifyTask(sample.task);
@@ -467,6 +509,48 @@ function buildTrendRecommendation(streak, latestVariant) {
     return "Balanced is currently the cheapest benchmark variant, so the default lane already matches the synthetic trend.";
   }
   return "Collect more benchmark history before changing the default cost lane purely from synthetic runs.";
+}
+
+function buildBenchmarkCycleSummary(benchmarkRuns, tuningRuns) {
+  const first = benchmarkRuns[0] ?? null;
+  const last = benchmarkRuns.at(-1) ?? null;
+  const balancedDelta = toFixedDelta(
+    Number(last?.balancedReductionPercent),
+    Number(first?.balancedReductionPercent)
+  );
+  const saverDelta = toFixedDelta(
+    Number(last?.saverReductionPercent),
+    Number(first?.saverReductionPercent)
+  );
+
+  let outcome = "flat";
+  if (Number.isFinite(balancedDelta) && balancedDelta >= 1) {
+    outcome = "improved";
+  } else if (Number.isFinite(balancedDelta) && balancedDelta <= -1) {
+    outcome = "degraded";
+  }
+
+  return {
+    firstCheapestVariant: first?.cheapestVariant ?? null,
+    lastCheapestVariant: last?.cheapestVariant ?? null,
+    balancedReductionPercentDelta: balancedDelta,
+    saverReductionPercentDelta: saverDelta,
+    tuningRunCount: tuningRuns.length,
+    acceptedCanaryCount: tuningRuns.filter((run) => run.reconciliation?.accepted === true).length,
+    rollbackCount: tuningRuns.filter((run) => Array.isArray(run.reconciliation?.rolledBack) && run.reconciliation.rolledBack.length > 0).length,
+    outcome,
+    recommendation: buildBenchmarkCycleRecommendation(outcome, balancedDelta, tuningRuns.length)
+  };
+}
+
+function buildBenchmarkCycleRecommendation(outcome, balancedDelta, tuningRunCount) {
+  if (outcome === "improved") {
+    return `The benchmark cycle improved by ${balancedDelta.toFixed(2)} balanced reduction points after ${tuningRunCount} tuning checkpoints.`;
+  }
+  if (outcome === "degraded") {
+    return `The benchmark cycle regressed by ${Math.abs(balancedDelta).toFixed(2)} balanced reduction points. Reconcile or tighten the auto-tune lane before trusting more changes.`;
+  }
+  return "The benchmark cycle stayed effectively flat. Collect more iterations before changing policy based on cycle data alone.";
 }
 
 function buildTuningComparison(report, lastTuning, monitoredDomains) {
