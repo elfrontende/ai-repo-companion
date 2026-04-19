@@ -13,7 +13,7 @@ import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "./lib/policy-tuning-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.mjs";
-import { buildRuntimeReport } from "./lib/runtime-report-engine.mjs";
+import { buildRuntimeReport, writeRuntimeReportHtml } from "./lib/runtime-report-engine.mjs";
 import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "./lib/benchmark-engine.mjs";
 import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
 
@@ -182,6 +182,16 @@ async function runDoctor() {
 }
 
 async function runReport() {
+  if (args.format === "html") {
+    const html = await writeRuntimeReportHtml(rootDir, systemConfig, args.output ? path.resolve(args.output) : null);
+    return {
+      rootDir,
+      mode: "report",
+      format: "html",
+      outputPath: html.outputPath,
+      report: html.report
+    };
+  }
   return {
     rootDir,
     mode: "report",
@@ -364,6 +374,8 @@ function helpText() {
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
       "node src/cli.mjs report",
+      "node src/cli.mjs report --format html",
+      "node src/cli.mjs report --format html --output ./runtime-report.html",
       "node src/cli.mjs benchmark",
       "node src/cli.mjs benchmark --suite low-risk",
       "node src/cli.mjs benchmark --suite high-risk",
