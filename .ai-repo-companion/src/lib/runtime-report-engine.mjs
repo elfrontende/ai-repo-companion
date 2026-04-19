@@ -84,7 +84,8 @@ function buildControls(status, doctor, tuning) {
     whyNotTuneHarder: status.compactSummary.whyNotTuneHarder,
     nextActions: status.nextActions.slice(0, 3).map(compactAction),
     doctorActions: doctor.recommendedActions.slice(0, 3).map(compactAction),
-    tuningPreview: (tuning.tuningPlan?.steps ?? []).slice(0, 3).map(buildPhasePreview)
+    tuningPreview: (tuning.tuningPlan?.steps ?? []).slice(0, 3).map(buildPhasePreview),
+    workflowPreview: (tuning.workflow?.phases ?? []).slice(0, 3).map(buildWorkflowPreview)
   };
 }
 
@@ -200,6 +201,15 @@ function buildPhaseEvidenceCard(step) {
     deltaBreakdown: step.deltaBreakdown,
     deltaHint: summarizePhaseDeltaHint(step.expectedImpact),
     whyThisPhase: step.whyThisPhase
+  };
+}
+
+function buildWorkflowPreview(phase) {
+  return {
+    phase: phase.phase,
+    recommendation: phase.recommendation,
+    commands: phase.commands,
+    recommendedLoop: phase.recommendedLoop
   };
 }
 
@@ -382,6 +392,14 @@ function renderRuntimeReportHtml(report) {
       <section class="grid">
         ${renderListCard("Runtime Actions", report.controls.nextActions.map((item) => `<code>${escapeHtml(item.action)}</code> — ${escapeHtml(item.whyNow)}`))}
         ${renderListCard("Doctor Actions", report.controls.doctorActions.map((item) => `<code>${escapeHtml(item.action)}</code> — ${escapeHtml(item.whyNow)}`))}
+      </section>
+
+      <h2>Tuning Workflow</h2>
+      <section class="grid">
+        ${renderListCard(
+          "Phase Loops",
+          report.controls.workflowPreview.map((phase) => `<strong>${escapeHtml(phase.phase)}</strong> — ${escapeHtml(phase.recommendation)}<br><span class="muted">${escapeHtml(phase.recommendedLoop.join(" -> "))}</span>`)
+        )}
       </section>
 
       <h2>Evidence</h2>
