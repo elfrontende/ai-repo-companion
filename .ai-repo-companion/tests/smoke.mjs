@@ -1586,6 +1586,10 @@ assert.ok(typeof runtimeDoctor.compactSummary.topFinding === "string");
 assert.ok(typeof runtimeDoctor.compactSummary.whyExpensive === "string");
 
 const runtimeReport = await buildRuntimeReport(statusRoot, statusConfig);
+assert.ok(typeof runtimeReport.compactSummary.healthLine === "string");
+assert.ok(typeof runtimeReport.compactSummary.economicsLine === "string");
+assert.ok(typeof runtimeReport.compactSummary.controlsLine === "string");
+assert.ok(typeof runtimeReport.compactSummary.evidenceLine === "string");
 assert.equal(runtimeReport.overview.queue.queued, 1);
 assert.equal(runtimeReport.overview.confidence.benchmark.level, "high");
 assert.equal(runtimeReport.overview.confidence.cycles.level, "high");

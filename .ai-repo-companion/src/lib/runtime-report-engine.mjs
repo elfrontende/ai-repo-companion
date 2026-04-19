@@ -15,6 +15,7 @@ export async function buildRuntimeReport(rootDir, config = {}) {
 
   return {
     generatedAt: new Date().toISOString(),
+    compactSummary: buildCompactOperatorSummary(status, doctor),
     overview: buildOverview(status),
     economics: buildEconomics(status),
     controls: buildControls(status, doctor, tuning),
@@ -48,6 +49,15 @@ function buildOverview(status) {
       benchmark: buildConfidenceCard(status.benchmarkSummary.confidence),
       cycles: buildConfidenceCard(status.benchmarkCycleSummary.confidence)
     }
+  };
+}
+
+function buildCompactOperatorSummary(status, doctor) {
+  return {
+    healthLine: status.compactSummary.health,
+    economicsLine: status.compactSummary.whyExpensive,
+    controlsLine: status.compactSummary.whyTuneNow,
+    evidenceLine: doctor.compactSummary.topFinding
   };
 }
 
@@ -381,6 +391,24 @@ function renderRuntimeReportHtml(report) {
     <main>
       <h1>Runtime Report</h1>
       <p class="lede">Generated at ${escapeHtml(report.generatedAt)}. This page compresses the operator control plane into a short visual briefing.</p>
+      <section class="grid">
+        <article class="card">
+          <div class="eyebrow">Health Line</div>
+          <div>${escapeHtml(report.compactSummary.healthLine)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Economics Line</div>
+          <div>${escapeHtml(report.compactSummary.economicsLine)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Controls Line</div>
+          <div>${escapeHtml(report.compactSummary.controlsLine)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Evidence Line</div>
+          <div>${escapeHtml(report.compactSummary.evidenceLine)}</div>
+        </article>
+      </section>
       <section class="grid">
         <article class="card">
           <div class="eyebrow">Health</div>
