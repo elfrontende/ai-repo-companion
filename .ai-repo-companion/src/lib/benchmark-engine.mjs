@@ -7,38 +7,86 @@ import { appendLine, readJson, writeJson } from "./store.mjs";
 import { applyReviewCostMode } from "./review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "./review-value-gate-engine.mjs";
 
-const defaultBenchmarkTasks = [
-  {
-    id: "docs-small",
-    task: "fix a typo and tighten wording in the deployment README",
-    difficulty: "small",
-    domain: "docs"
-  },
-  {
-    id: "ui-medium",
-    task: "add validation rules and error states for a login form component",
-    difficulty: "medium",
-    domain: "ui"
-  },
-  {
-    id: "auth-hard",
-    task: "design a security-focused migration plan for auth middleware and permission checks",
-    difficulty: "hard",
-    domain: "security"
-  },
-  {
-    id: "testing-medium",
-    task: "investigate a flaky regression test around API retries and timeouts",
-    difficulty: "medium",
-    domain: "testing"
-  },
-  {
-    id: "deploy-hard",
-    task: "prepare a migration-safe CI/CD rollout and deployment fallback checklist",
-    difficulty: "hard",
-    domain: "deploy"
-  }
-];
+const benchmarkSuites = {
+  mixed: [
+    {
+      id: "docs-small",
+      task: "fix a typo and tighten wording in the deployment README",
+      difficulty: "small",
+      domain: "docs"
+    },
+    {
+      id: "ui-medium",
+      task: "add validation rules and error states for a login form component",
+      difficulty: "medium",
+      domain: "ui"
+    },
+    {
+      id: "auth-hard",
+      task: "design a security-focused migration plan for auth middleware and permission checks",
+      difficulty: "hard",
+      domain: "security"
+    },
+    {
+      id: "testing-medium",
+      task: "investigate a flaky regression test around API retries and timeouts",
+      difficulty: "medium",
+      domain: "testing"
+    },
+    {
+      id: "deploy-hard",
+      task: "prepare a migration-safe CI/CD rollout and deployment fallback checklist",
+      difficulty: "hard",
+      domain: "deploy"
+    }
+  ],
+  "low-risk": [
+    {
+      id: "docs-small",
+      task: "fix a typo and tighten wording in the deployment README",
+      difficulty: "small",
+      domain: "docs"
+    },
+    {
+      id: "ui-medium",
+      task: "add validation rules and error states for a login form component",
+      difficulty: "medium",
+      domain: "ui"
+    },
+    {
+      id: "testing-medium",
+      task: "investigate a flaky regression test around API retries and timeouts",
+      difficulty: "medium",
+      domain: "testing"
+    },
+    {
+      id: "deploy-medium",
+      task: "prepare a deployment handoff checklist and rollback notes for a routine release",
+      difficulty: "medium",
+      domain: "deploy"
+    }
+  ],
+  "high-risk": [
+    {
+      id: "auth-hard",
+      task: "design a security-focused migration plan for auth middleware and permission checks",
+      difficulty: "hard",
+      domain: "security"
+    },
+    {
+      id: "migration-hard",
+      task: "plan a migration-safe database rollout with fallback checkpoints and recovery notes",
+      difficulty: "hard",
+      domain: "migration"
+    },
+    {
+      id: "architecture-hard",
+      task: "review an event-bus architecture refactor for failure isolation and rollback safety",
+      difficulty: "hard",
+      domain: "architecture"
+    }
+  ]
+};
 
 const benchmarkVariants = [
   { id: "saver", costMode: "saver", reviewProfile: "light" },
@@ -46,13 +94,15 @@ const benchmarkVariants = [
   { id: "strict", costMode: "strict", reviewProfile: "heavy" }
 ];
 
-export async function runSyntheticBenchmark(rootDir, config) {
+export async function runSyntheticBenchmark(rootDir, config, options = {}) {
+  const suite = resolveBenchmarkSuite(options.suite);
+  const suiteTasks = benchmarkSuites[suite];
   const notes = augmentWithNoiseNotes(await loadNotes(rootDir));
   const allNoteTokens = notes.reduce((total, note) => total + note.tokenEstimate, 0);
   const allNoteCount = notes.length;
   const taskResults = [];
 
-  for (const sample of defaultBenchmarkTasks) {
+  for (const sample of suiteTasks) {
     const baseline = buildBaselineBenchmark(sample, allNoteTokens, allNoteCount);
     const variants = {};
 
@@ -83,27 +133,37 @@ export async function runSyntheticBenchmark(rootDir, config) {
   const aggregate = aggregateBenchmarkResults(taskResults);
   const report = {
     generatedAt: new Date().toISOString(),
+    suite,
     variants: benchmarkVariants,
     tasks: taskResults,
     aggregate
   };
-  const reportPath = path.join(rootDir, "state/benchmarks/last-benchmark.json");
-  const historyPath = path.join(rootDir, "state/benchmarks/history.jsonl");
+  const reportPath = getBenchmarkReportPath(rootDir, suite);
+  const historyPath = getBenchmarkHistoryPath(rootDir, suite);
   const historyRetentionEntries = Number(config.tuning?.benchmarkHistoryRetentionEntries) || 50;
   const trendWindow = Number(config.tuning?.benchmarkTrendWindow) || 5;
   await writeJson(reportPath, report);
   await appendLine(historyPath, JSON.stringify({
     generatedAt: report.generatedAt,
+    suite,
     aggregate
   }));
   await trimBenchmarkHistory(historyPath, historyRetentionEntries);
   report.trend = await buildBenchmarkTrend(historyPath, trendWindow);
-  report.tuningComparison = buildTuningComparison(
-    report,
-    await readJson(path.join(rootDir, "state/tuning/last-tuning.json"), null),
-    config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"]
-  );
+  report.tuningComparison = suite === "mixed"
+    ? buildTuningComparison(
+      report,
+      await readJson(path.join(rootDir, "state/tuning/last-tuning.json"), null),
+      config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"]
+    )
+    : {
+      available: false,
+      reason: "suite-specific-benchmark"
+    };
   await writeJson(reportPath, report);
+  if (suite === "mixed") {
+    await writeJson(path.join(rootDir, "state/benchmarks/last-benchmark.json"), report);
+  }
 
   return {
     reportPath,
@@ -114,14 +174,16 @@ export async function runSyntheticBenchmark(rootDir, config) {
 export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
   const iterations = Math.max(1, Number(options.iterations) || 3);
   const autoTuneBetweenRuns = options.autoTuneBetweenRuns === true;
+  const suite = resolveBenchmarkSuite(options.suite);
   const benchmarkRuns = [];
   const tuningRuns = [];
 
   for (let index = 0; index < iterations; index += 1) {
     const config = await readJson(path.join(rootDir, "config/system.json"), {});
-    const benchmark = await runSyntheticBenchmark(rootDir, config);
+    const benchmark = await runSyntheticBenchmark(rootDir, config, { suite });
     benchmarkRuns.push({
       iteration: index + 1,
+      suite,
       generatedAt: benchmark.report.generatedAt,
       cheapestVariant: benchmark.report.aggregate.cheapestVariant,
       balancedReductionPercent: benchmark.report.aggregate.byVariant?.balanced?.reductionPercent ?? null,
@@ -146,11 +208,30 @@ export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
 
   return {
     iterations,
+    suite,
     autoTuneBetweenRuns,
     benchmarks: benchmarkRuns,
     tuningRuns,
     summary: buildBenchmarkCycleSummary(benchmarkRuns, tuningRuns)
   };
+}
+
+function resolveBenchmarkSuite(requestedSuite) {
+  return Object.prototype.hasOwnProperty.call(benchmarkSuites, requestedSuite ?? "")
+    ? requestedSuite
+    : "mixed";
+}
+
+function getBenchmarkReportPath(rootDir, suite) {
+  return suite === "mixed"
+    ? path.join(rootDir, "state/benchmarks/last-benchmark.json")
+    : path.join(rootDir, `state/benchmarks/last-benchmark-${suite}.json`);
+}
+
+function getBenchmarkHistoryPath(rootDir, suite) {
+  return suite === "mixed"
+    ? path.join(rootDir, "state/benchmarks/history.jsonl")
+    : path.join(rootDir, `state/benchmarks/history-${suite}.jsonl`);
 }
 
 async function buildVariantBenchmark(rootDir, config, notes, sample, variant) {

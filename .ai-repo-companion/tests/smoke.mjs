@@ -1393,6 +1393,18 @@ assert.equal(benchmarkReport.tuningComparison.byDomain.docs.outcome, "improved")
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
 assert.equal(benchmarkHistory.trim().split("\n").length, 3);
 
+const lowRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "low-risk" });
+assert.equal(lowRiskBenchmark.report.suite, "low-risk");
+assert.equal(lowRiskBenchmark.report.aggregate.taskCount, 4);
+assert.equal(lowRiskBenchmark.report.tuningComparison.available, false);
+const lowRiskHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history-low-risk.jsonl"), "utf8");
+assert.equal(lowRiskHistory.trim().split("\n").length, 1);
+
+const highRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "high-risk" });
+assert.equal(highRiskBenchmark.report.suite, "high-risk");
+assert.equal(highRiskBenchmark.report.aggregate.taskCount, 3);
+assert.equal(highRiskBenchmark.report.tasks.every((task) => ["security", "migration", "architecture"].includes(task.domain)), true);
+
 const benchmarkCycleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-benchmark-cycle-"));
 await fs.cp(path.resolve("config"), path.join(benchmarkCycleRoot, "config"), { recursive: true });
 await fs.cp(path.resolve("notes"), path.join(benchmarkCycleRoot, "notes"), { recursive: true });
@@ -1408,8 +1420,10 @@ cycleConfig.tuning.maxAutoApplySuggestionsPerRun = 2;
 await writeJson(path.join(benchmarkCycleRoot, "config/system.json"), cycleConfig);
 const benchmarkCycle = await runSyntheticBenchmarkCycle(benchmarkCycleRoot, {
   iterations: 3,
-  autoTuneBetweenRuns: true
+  autoTuneBetweenRuns: true,
+  suite: "low-risk"
 });
+assert.equal(benchmarkCycle.suite, "low-risk");
 assert.equal(benchmarkCycle.benchmarks.length, 3);
 assert.equal(benchmarkCycle.tuningRuns.length, 2);
 assert.ok(["improved", "flat", "degraded"].includes(benchmarkCycle.summary.outcome));

@@ -179,15 +179,17 @@ async function runDoctor() {
 
 async function runBenchmark(args = {}) {
   const iterations = Math.max(1, Number(args.iterations) || 1);
+  const suite = args.suite ?? "mixed";
   return {
     rootDir,
     mode: "benchmark",
     benchmark: iterations > 1
       ? await runSyntheticBenchmarkCycle(rootDir, {
         iterations,
-        autoTuneBetweenRuns: args.autoTuneBetweenRuns === true
+        autoTuneBetweenRuns: args.autoTuneBetweenRuns === true,
+        suite
       })
-      : await runSyntheticBenchmark(rootDir, systemConfig)
+      : await runSyntheticBenchmark(rootDir, systemConfig, { suite })
   };
 }
 
@@ -350,6 +352,8 @@ function helpText() {
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
       "node src/cli.mjs benchmark",
+      "node src/cli.mjs benchmark --suite low-risk",
+      "node src/cli.mjs benchmark --suite high-risk",
       "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
