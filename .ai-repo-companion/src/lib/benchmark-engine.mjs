@@ -257,6 +257,7 @@ async function buildBenchmarkTrend(historyPath, trendWindow) {
     cheapestVariantStreak,
     latestCheapestVariant: latest?.aggregate?.cheapestVariant ?? null,
     deltaByVariant: buildVariantDelta(previous?.aggregate?.byVariant, latest?.aggregate?.byVariant),
+    byDomain: buildDomainTrend(recent),
     recommendation: buildTrendRecommendation(cheapestVariantStreak, latest?.aggregate?.cheapestVariant ?? null)
   };
 }
@@ -358,6 +359,54 @@ function buildVariantDelta(previousByVariant = {}, latestByVariant = {}) {
       }
     ])
   );
+}
+
+function buildDomainTrend(entries) {
+  const latestByDomain = entries.at(-1)?.aggregate?.byDomain ?? {};
+  const previousByDomain = entries.at(-2)?.aggregate?.byDomain ?? {};
+  const domains = new Set([
+    ...Object.keys(latestByDomain),
+    ...Object.keys(previousByDomain)
+  ]);
+
+  return Object.fromEntries(
+    [...domains].map((domain) => {
+      const recentEntries = entries.filter((entry) => entry?.aggregate?.byDomain?.[domain]);
+      const latestVariant = recentEntries.at(-1)?.aggregate?.byDomain?.[domain]?.cheapestVariant ?? null;
+      return [
+        domain,
+        {
+          latestCheapestVariant: latestVariant,
+          cheapestVariantStreak: countDomainCheapestVariantStreak(recentEntries, domain),
+          deltaByVariant: buildVariantDelta(
+            previousByDomain?.[domain]?.byVariant,
+            latestByDomain?.[domain]?.byVariant
+          )
+        }
+      ];
+    })
+  );
+}
+
+function countDomainCheapestVariantStreak(entries, domain) {
+  const latestVariant = entries.at(-1)?.aggregate?.byDomain?.[domain]?.cheapestVariant ?? null;
+  if (!latestVariant) {
+    return {
+      variant: null,
+      count: 0
+    };
+  }
+  let count = 0;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index]?.aggregate?.byDomain?.[domain]?.cheapestVariant !== latestVariant) {
+      break;
+    }
+    count += 1;
+  }
+  return {
+    variant: latestVariant,
+    count
+  };
 }
 
 function aggregateBenchmarkByDomain(taskResults) {

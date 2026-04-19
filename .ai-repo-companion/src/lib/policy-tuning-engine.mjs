@@ -406,7 +406,8 @@ function buildPolicySuggestions(config, metrics, benchmark) {
   const domainSignal = buildDomainLeanSignal(
     benchmark?.aggregate?.byDomain ?? {},
     config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"],
-    metrics?.tokensByDomain ?? {}
+    metrics?.tokensByDomain ?? {},
+    benchmark?.trend?.byDomain ?? {}
   );
 
   maybePushSuggestion(suggestions, {
@@ -465,7 +466,7 @@ function buildPolicySuggestions(config, metrics, benchmark) {
   return suggestions;
 }
 
-function buildDomainLeanSignal(byDomain, monitoredDomains, tokensByDomain) {
+function buildDomainLeanSignal(byDomain, monitoredDomains, tokensByDomain, trendByDomain) {
   const matchedDomains = [];
   const domainPriorities = {};
 
@@ -477,10 +478,12 @@ function buildDomainLeanSignal(byDomain, monitoredDomains, tokensByDomain) {
     const saverReduction = Number(summary?.byVariant?.saver?.reductionPercent);
     const balancedReduction = Number(summary?.byVariant?.balanced?.reductionPercent);
     const reductionGap = saverReduction - balancedReduction;
-    if (summary?.cheapestVariant === "saver" && Number.isFinite(reductionGap) && reductionGap >= 4) {
+    const saverTrendStreak = Number(trendByDomain?.[domain]?.cheapestVariantStreak?.count) || 0;
+    const saverTrendConfirmed = saverTrendStreak >= 2 || Object.keys(trendByDomain ?? {}).length === 0;
+    if (summary?.cheapestVariant === "saver" && Number.isFinite(reductionGap) && reductionGap >= 4 && saverTrendConfirmed) {
       matchedDomains.push(domain);
       const liveTokensUsed = Number(tokensByDomain?.[domain]) || 0;
-      domainPriorities[domain] = Math.round(liveTokensUsed + (reductionGap * 1000));
+      domainPriorities[domain] = Math.round(liveTokensUsed + (reductionGap * 1000) + (saverTrendStreak * 500));
     }
   }
 
