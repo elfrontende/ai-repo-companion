@@ -14,6 +14,7 @@
     "queue": "node src/cli.mjs queue",
     "status": "node src/cli.mjs status",
     "doctor": "node src/cli.mjs doctor",
+    "report": "node src/cli.mjs report",
     "benchmark": "node src/cli.mjs benchmark",
     "metrics": "node src/cli.mjs metrics",
     "tune": "node src/cli.mjs tune",
