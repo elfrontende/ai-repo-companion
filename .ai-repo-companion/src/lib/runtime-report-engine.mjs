@@ -149,6 +149,7 @@ function buildEvidence(status, doctor, tuning) {
         count: multiCycle.windowHistory?.count ?? 0,
         items: (multiCycle.windowHistory?.items ?? []).slice(-3)
       },
+      recentWindowExtremes: multiCycle.recentWindowExtremes ?? { available: false, reason: "no-window-history" },
       confidence: buildConfidenceCard(status.benchmarkCycleSummary.confidence),
       summary: buildLongRunSummary(status.benchmarkCycleSummary)
     },
@@ -248,12 +249,13 @@ function buildLongRunSummary(benchmarkCycleSummary) {
   const latestOutcomeStreak = Number(benchmarkCycleSummary.latestOutcomeStreak) || 0;
   const confidence = benchmarkCycleSummary.confidence?.level ?? "low";
   const stableWindowDirection = benchmarkCycleSummary.multiCycle?.stableWindowDirection ?? null;
+  const spread = benchmarkCycleSummary.multiCycle?.recentWindowExtremes?.spread ?? null;
 
   if (trendDirection === "improving") {
-    return `Long-run cycle evidence is ${confidence} confidence and improving, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} across the recent window, a streak of ${latestOutcomeStreak}, and ${stableWindowDirection === "improving" ? "repeated improving window comparisons." : "at least one recent improving window comparison."}`;
+    return `Long-run cycle evidence is ${confidence} confidence and improving, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} across the recent window, a streak of ${latestOutcomeStreak}, ${stableWindowDirection === "improving" ? "repeated improving window comparisons," : "at least one recent improving window comparison,"} and a recent window spread of ${Number.isFinite(spread) ? spread.toFixed(2) : "0.00"}.`;
   }
   if (trendDirection === "degrading") {
-    return `Long-run cycle evidence is ${confidence} confidence and degrading, with an average balanced delta of ${averageBalancedDelta.toFixed(2)}, a streak of ${latestOutcomeStreak}, and ${stableWindowDirection === "degrading" ? "repeated degrading window comparisons." : "at least one recent degrading window comparison."}`;
+    return `Long-run cycle evidence is ${confidence} confidence and degrading, with an average balanced delta of ${averageBalancedDelta.toFixed(2)}, a streak of ${latestOutcomeStreak}, ${stableWindowDirection === "degrading" ? "repeated degrading window comparisons," : "at least one recent degrading window comparison,"} and a recent window spread of ${Number.isFinite(spread) ? spread.toFixed(2) : "0.00"}.`;
   }
   return `Long-run cycle evidence is ${confidence} confidence and still mixed, so recent benchmark windows should be treated as directional rather than conclusive.`;
 }

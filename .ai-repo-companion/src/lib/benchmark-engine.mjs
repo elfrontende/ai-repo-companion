@@ -758,6 +758,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
   });
   const windowComparison = buildCycleWindowComparison(entries, comparisonWindow);
   const windowHistory = buildCycleWindowHistory(entries, comparisonWindow);
+  const recentWindowExtremes = buildRecentWindowExtremes(windowHistory);
   const confidence = buildBenchmarkCycleConfidence({
     recentCycleCount: summaries.length,
     latestOutcomeStreak,
@@ -780,6 +781,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
     trendDirection,
     windowComparison,
     windowHistory,
+    recentWindowExtremes,
     stableWindowDirection: resolveStableWindowDirection(windowHistory),
     confidence,
     recommendation: buildCycleTrendRecommendation({
@@ -877,6 +879,28 @@ function resolveStableWindowDirection(windowHistory) {
   const latest = directions.at(-1);
   const previous = directions.at(-2);
   return latest === previous ? latest : null;
+}
+
+function buildRecentWindowExtremes(windowHistory) {
+  if (!windowHistory?.available || (windowHistory.items?.length ?? 0) === 0) {
+    return {
+      available: false,
+      reason: "no-window-history"
+    };
+  }
+
+  const sorted = [...windowHistory.items].sort((left, right) => (right.delta ?? 0) - (left.delta ?? 0));
+  const best = sorted[0] ?? null;
+  const worst = sorted.at(-1) ?? null;
+
+  return {
+    available: Boolean(best && worst),
+    best,
+    worst,
+    spread: best && worst
+      ? toFixedDelta(Number(best.delta) || 0, Number(worst.delta) || 0)
+      : null
+  };
 }
 
 function averageCycleOutcomeMetric(entries) {
