@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { getRuntimeStatus, runRuntimeDoctor } from "./runtime-status-engine.mjs";
 import { analyzePolicyTuning } from "./policy-tuning-engine.mjs";
 
@@ -17,6 +19,17 @@ export async function buildRuntimeReport(rootDir, config = {}) {
     economics: buildEconomics(status),
     controls: buildControls(status, doctor, tuning),
     evidence: buildEvidence(status, doctor, tuning)
+  };
+}
+
+export async function writeRuntimeReportHtml(rootDir, config = {}, outputPath) {
+  const report = await buildRuntimeReport(rootDir, config);
+  const finalOutputPath = outputPath || path.join(rootDir, "state/reports/runtime-report.html");
+  await fs.mkdir(path.dirname(finalOutputPath), { recursive: true });
+  await fs.writeFile(finalOutputPath, renderRuntimeReportHtml(report), "utf8");
+  return {
+    outputPath: finalOutputPath,
+    report
   };
 }
 
@@ -222,4 +235,179 @@ function buildLongRunSummary(benchmarkCycleSummary) {
     return `Long-run cycle evidence is ${confidence} confidence and degrading, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} and a streak of ${latestOutcomeStreak}.`;
   }
   return `Long-run cycle evidence is ${confidence} confidence and still mixed, so recent benchmark windows should be treated as directional rather than conclusive.`;
+}
+
+function renderRuntimeReportHtml(report) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Repo Companion Runtime Report</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f4ef;
+        --panel: #fffdf7;
+        --ink: #1c1b18;
+        --muted: #6b665f;
+        --accent: #0f766e;
+        --border: #d9d2c4;
+      }
+      body {
+        margin: 0;
+        font: 15px/1.5 "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        background: linear-gradient(180deg, #f8f6ef 0%, #ece7d9 100%);
+        color: var(--ink);
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      h1, h2, h3 {
+        font-family: "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
+        letter-spacing: 0.02em;
+        margin: 0 0 12px;
+      }
+      h1 {
+        font-size: 36px;
+      }
+      h2 {
+        font-size: 24px;
+        margin-top: 28px;
+      }
+      .lede {
+        color: var(--muted);
+        margin: 0 0 24px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 10px 24px rgba(28, 27, 24, 0.04);
+      }
+      .eyebrow {
+        font: 12px/1.2 "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin-bottom: 8px;
+      }
+      .metric {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      ul {
+        padding-left: 18px;
+        margin: 8px 0 0;
+      }
+      li + li {
+        margin-top: 8px;
+      }
+      code {
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        background: rgba(15, 118, 110, 0.08);
+        padding: 1px 5px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Runtime Report</h1>
+      <p class="lede">Generated at ${escapeHtml(report.generatedAt)}. This page compresses the operator control plane into a short visual briefing.</p>
+      <section class="grid">
+        <article class="card">
+          <div class="eyebrow">Health</div>
+          <div class="metric">${escapeHtml(report.overview.health)}</div>
+          <div class="muted">Queued: ${report.overview.queue.queued}, running: ${report.overview.queue.running}, approvals: ${report.overview.queue.awaitingApproval}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Live Tokens</div>
+          <div class="metric">${escapeHtml(String(report.overview.liveTokensUsed))}</div>
+          <div class="muted">Average per run: ${escapeHtml(String(report.overview.avgTokensPerRun))}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Benchmark Confidence</div>
+          <div class="metric">${escapeHtml(report.overview.confidence.benchmark.level)}</div>
+          <div class="muted">${escapeHtml(report.overview.confidence.benchmark.primaryReason)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Cycle Confidence</div>
+          <div class="metric">${escapeHtml(report.overview.confidence.cycles.level)}</div>
+          <div class="muted">${escapeHtml(report.overview.confidence.cycles.primaryReason)}</div>
+        </article>
+      </section>
+
+      <h2>Economics</h2>
+      <section class="grid">
+        <article class="card">
+          <div class="eyebrow">Why Expensive</div>
+          <div>${escapeHtml(report.economics.whyExpensive)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Why Confident</div>
+          <div>${escapeHtml(report.economics.whyConfident)}</div>
+        </article>
+      </section>
+
+      <h2>Next Actions</h2>
+      <section class="grid">
+        ${renderListCard("Runtime Actions", report.controls.nextActions.map((item) => `<code>${escapeHtml(item.action)}</code> — ${escapeHtml(item.whyNow)}`))}
+        ${renderListCard("Doctor Actions", report.controls.doctorActions.map((item) => `<code>${escapeHtml(item.action)}</code> — ${escapeHtml(item.whyNow)}`))}
+      </section>
+
+      <h2>Evidence</h2>
+      <section class="grid">
+        <article class="card">
+          <div class="eyebrow">Before / After</div>
+          <div class="metric">${escapeHtml(report.evidence.beforeAfter.confidence.level)}</div>
+          <div>${escapeHtml(report.evidence.beforeAfter.summary)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Long Run</div>
+          <div class="metric">${escapeHtml(report.evidence.longRun.confidence.level)}</div>
+          <div>${escapeHtml(report.evidence.longRun.summary)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Rollback</div>
+          <div class="metric">${escapeHtml(report.evidence.rollback.canaryStatus)}</div>
+          <div>${escapeHtml(report.evidence.rollback.primaryReason)}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Diagnostics</div>
+          <div class="metric">${escapeHtml(report.evidence.diagnostics.highestSeverity)}</div>
+          <div>${escapeHtml(report.evidence.diagnostics.topFinding)}</div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+function renderListCard(title, items) {
+  const list = items.length > 0
+    ? `<ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul>`
+    : `<div class="muted">No items.</div>`;
+  return `<article class="card"><div class="eyebrow">${escapeHtml(title)}</div>${list}</article>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }

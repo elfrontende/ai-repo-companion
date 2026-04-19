@@ -36,7 +36,7 @@ import { summarizeReviewMetrics } from "../src/lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "../src/lib/policy-tuning-engine.mjs";
 import { acquireReviewLock, releaseReviewLock } from "../src/lib/review-lock-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "../src/lib/runtime-status-engine.mjs";
-import { buildRuntimeReport } from "../src/lib/runtime-report-engine.mjs";
+import { buildRuntimeReport, writeRuntimeReportHtml } from "../src/lib/runtime-report-engine.mjs";
 import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "../src/lib/benchmark-engine.mjs";
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
@@ -1526,6 +1526,12 @@ assert.ok(["low", "medium", "high"].includes(runtimeReport.evidence.tuningPhases
 assert.ok(typeof runtimeReport.evidence.tuningPhases[0].deltaBreakdown.totalThresholdDelta === "number");
 assert.equal(runtimeReport.evidence.cycles.windowDirection, "improving");
 assert.equal(runtimeReport.evidence.diagnostics.highestSeverity, "info");
+
+const htmlReport = await writeRuntimeReportHtml(statusRoot, statusConfig, path.join(statusRoot, "state/reports/test-runtime-report.html"));
+const htmlPayload = await fs.readFile(htmlReport.outputPath, "utf8");
+assert.match(htmlPayload, /<title>AI Repo Companion Runtime Report<\/title>/i);
+assert.match(htmlPayload, /Runtime Report/i);
+assert.match(htmlPayload, /Before \/ After/i);
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
