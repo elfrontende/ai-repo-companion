@@ -190,7 +190,8 @@ function buildPhasePreview(step) {
     whyThisPhase: step.whyThisPhase,
     expectedImpactSummary: step.expectedImpactSummary,
     deltaBreakdown: step.deltaBreakdown,
-    deltaHint: summarizePhaseDeltaHint(step.expectedImpact)
+    deltaHint: summarizePhaseDeltaHint(step.expectedImpact),
+    deltaCard: buildPhaseDeltaCard(step.expectedImpact, step.deltaBreakdown)
   };
 }
 
@@ -204,6 +205,7 @@ function buildPhaseEvidenceCard(step) {
     expectedImpactSummary: step.expectedImpactSummary,
     deltaBreakdown: step.deltaBreakdown,
     deltaHint: summarizePhaseDeltaHint(step.expectedImpact),
+    deltaCard: buildPhaseDeltaCard(step.expectedImpact, step.deltaBreakdown),
     whyThisPhase: step.whyThisPhase
   };
 }
@@ -241,6 +243,22 @@ function summarizePhaseDeltaHint(expectedImpact) {
     return `Raises local thresholds by about ${thresholdDelta} points.`;
   }
   return "Expected impact is directional but not yet strong enough for a numeric delta hint.";
+}
+
+function buildPhaseDeltaCard(expectedImpact, deltaBreakdown) {
+  const domains = Array.isArray(expectedImpact?.domains)
+    ? expectedImpact.domains.map((item) => item.domain).filter(Boolean)
+    : Array.isArray(expectedImpact?.affectedDomains)
+      ? expectedImpact.affectedDomains.filter(Boolean)
+      : [];
+
+  return {
+    estimatedTokenDelta: Number(expectedImpact?.estimatedTokenDelta) || 0,
+    totalThresholdDelta: Number(deltaBreakdown?.totalThresholdDelta) || 0,
+    affectedDomains: domains,
+    applyableChanges: Number(deltaBreakdown?.applyableChanges) || 0,
+    autoApplicableChanges: Number(deltaBreakdown?.autoApplicableChanges) || 0
+  };
 }
 
 function buildLongRunSummary(benchmarkCycleSummary) {
