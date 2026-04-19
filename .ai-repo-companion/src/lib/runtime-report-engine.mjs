@@ -62,8 +62,11 @@ function buildEconomics(status) {
       liveTokensUsed: item.liveTokensUsed,
       reductionGap: item.reductionGap,
       evidenceScore: item.evidenceScore,
+      evidenceBand: item.evidenceBand,
       riskLevel: item.riskLevel,
       expectedSavingsHint: item.expectedSavingsHint,
+      expectedOutcome: item.expectedOutcome,
+      impactSummary: item.impactSummary,
       whyRanked: item.whyRanked
     })),
     safeSavingsOpportunities: status.benchmarkSummary.safeSavingsOpportunities.map((item) => ({
@@ -72,8 +75,11 @@ function buildEconomics(status) {
       currentThreshold: item.currentThreshold,
       suggestedThreshold: item.suggestedThreshold,
       evidenceScore: item.evidenceScore,
+      evidenceBand: item.evidenceBand,
       riskLevel: item.riskLevel,
       expectedSavingsHint: item.expectedSavingsHint,
+      expectedOutcome: item.expectedOutcome,
+      impactSummary: item.impactSummary,
       whyRanked: item.whyRanked
     }))
   };
@@ -176,8 +182,10 @@ function compactAction(action) {
     reason: action.reason,
     whyNow: action.whyNow,
     evidenceScore: action.evidenceScore,
+    evidenceBand: action.evidenceBand,
     riskLevel: action.riskLevel,
-    expectedOutcome: action.expectedOutcome
+    expectedOutcome: action.expectedOutcome,
+    impactSummary: action.impactSummary
   };
 }
 

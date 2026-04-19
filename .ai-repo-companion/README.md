@@ -209,6 +209,7 @@ Daily ergonomics are better now too:
 - `status` now also returns `nextActions`, a short prioritized list of the most useful local commands to run next
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
 - those ranked domains and actions now also carry a small `evidenceScore`, so operators can quickly tell whether a recommendation is backed by strong local cost signal or only thin evidence
+- those same ranked domains and actions now also carry `evidenceBand`, `expectedOutcome`, and `impactSummary`, so operators can see not just that a recommendation is strong, but what concrete runtime effect it is expected to have
 - ranked status items now also include short explanation fields like `whyRanked` and `whyNow`, so the operator can quickly see why a domain or action is currently prioritized
 - `status` and `doctor` now also return compact summary blocks like `whyExpensive`, `whyTuneNow`, and `whyQueueBlocked`, so the operator can scan the control-plane state without reading the full diagnostics tree
 - those compact summaries now also explain `whySkipped` and `whyLiveReview`, so an operator can tell whether the runtime is currently saving cost via local gates or still spending mostly on justified live review paths
