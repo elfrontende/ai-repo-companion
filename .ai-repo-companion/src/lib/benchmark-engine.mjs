@@ -759,6 +759,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
   const windowComparison = buildCycleWindowComparison(entries, comparisonWindow);
   const windowHistory = buildCycleWindowHistory(entries, comparisonWindow);
   const recentWindowExtremes = buildRecentWindowExtremes(windowHistory);
+  const windowHistorySummary = buildWindowHistorySummary(windowHistory);
   const confidence = buildBenchmarkCycleConfidence({
     recentCycleCount: summaries.length,
     latestOutcomeStreak,
@@ -782,6 +783,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
     windowComparison,
     windowHistory,
     recentWindowExtremes,
+    windowHistorySummary,
     stableWindowDirection: resolveStableWindowDirection(windowHistory),
     confidence,
     recommendation: buildCycleTrendRecommendation({
@@ -903,6 +905,41 @@ function buildRecentWindowExtremes(windowHistory) {
   };
 }
 
+function buildWindowHistorySummary(windowHistory) {
+  if (!windowHistory?.available || (windowHistory.items?.length ?? 0) === 0) {
+    return {
+      available: false,
+      reason: "no-window-history"
+    };
+  }
+
+  const counts = windowHistory.items.reduce((accumulator, item) => {
+    const key = item.direction ?? "flat";
+    accumulator[key] = (accumulator[key] ?? 0) + 1;
+    return accumulator;
+  }, {});
+  const dominantDirection = Object.entries(counts)
+    .sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+  const averageDelta = Number((
+    windowHistory.items.reduce((total, item) => total + (Number(item.delta) || 0), 0)
+    / Math.max(1, windowHistory.items.length)
+  ).toFixed(2));
+  const volatility = Number((
+    windowHistory.items.reduce((total, item) => total + Math.abs(Number(item.delta) || 0), 0)
+    / Math.max(1, windowHistory.items.length)
+  ).toFixed(2));
+
+  return {
+    available: true,
+    count: windowHistory.items.length,
+    counts,
+    dominantDirection,
+    averageDelta,
+    volatility,
+    summary: buildWindowHistorySummaryText(dominantDirection, counts, averageDelta, volatility)
+  };
+}
+
 function averageCycleOutcomeMetric(entries) {
   return Number((
     entries.reduce((total, entry) => total + (Number(entry?.summary?.balancedReductionPercentDelta) || 0), 0)
@@ -918,6 +955,16 @@ function buildCycleWindowRecommendation(direction, delta, windowSize) {
     return `The last ${windowSize} cycle runs are degrading by ${Math.abs(delta).toFixed(2)} balanced points versus the previous window.`;
   }
   return `The last ${windowSize} cycle runs are effectively flat versus the previous window.`;
+}
+
+function buildWindowHistorySummaryText(dominantDirection, counts, averageDelta, volatility) {
+  if (dominantDirection === "improving") {
+    return `Recent window comparisons skew improving (${counts.improving ?? 0} improving vs ${counts.degrading ?? 0} degrading) with an average delta of ${averageDelta.toFixed(2)}.`;
+  }
+  if (dominantDirection === "degrading") {
+    return `Recent window comparisons skew degrading (${counts.degrading ?? 0} degrading vs ${counts.improving ?? 0} improving) with an average delta of ${averageDelta.toFixed(2)}.`;
+  }
+  return `Recent window comparisons are mixed or flat, with volatility around ${volatility.toFixed(2)} and no stable direction yet.`;
 }
 
 function countCycleOutcomeStreak(summaries, outcome) {
