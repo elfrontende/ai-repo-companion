@@ -215,6 +215,8 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
   const freshnessMinutes = config.tuning?.benchmarkFreshnessMinutes ?? 1440;
   const ageMinutes = ageInMinutes(generatedAt);
   const domainDiagnostics = buildDomainDiagnostics(benchmark, config, metrics);
+  const topWasteDomains = buildTopWasteDomains(domainDiagnostics);
+  const safeSavingsOpportunities = buildSafeSavingsOpportunities(domainDiagnostics);
   return {
     loaded: Boolean(benchmark?.aggregate),
     generatedAt,
@@ -224,6 +226,8 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
     saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
     domainDiagnostics,
+    topWasteDomains,
+    safeSavingsOpportunities,
     domainTrend: benchmark?.trend?.byDomain ?? {},
     tuningComparison: benchmark?.tuningComparison ?? null
   };
@@ -288,6 +292,7 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
       const configuredThreshold = Number(storedThreshold) || globalThreshold;
       const suggestedThreshold = Math.min(90, globalThreshold + 5);
       const saverTrendStreak = Number(benchmark?.trend?.byDomain?.[domain]?.cheapestVariantStreak?.count) || 0;
+      const wasteScore = Math.round((Number(tokenMap[domain]) || 0) * Math.max(1, reductionGap));
       const shouldTightenValueGate = summary?.cheapestVariant === "saver"
         && reductionGap >= 4
         && saverTrendStreak >= 2
@@ -303,6 +308,7 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
         configuredThreshold,
         suggestedThreshold,
         liveTokensUsed: Number(tokenMap[domain]) || 0,
+        wasteScore,
         shouldTightenValueGate
       };
     })
@@ -312,6 +318,46 @@ function buildDomainDiagnostics(benchmark, config, metrics) {
       }
       return right.reductionGap - left.reductionGap;
     });
+}
+
+function buildTopWasteDomains(domainDiagnostics) {
+  return [...domainDiagnostics]
+    .filter((item) => item.liveTokensUsed > 0)
+    .sort((left, right) => {
+      if (right.wasteScore !== left.wasteScore) {
+        return right.wasteScore - left.wasteScore;
+      }
+      return right.liveTokensUsed - left.liveTokensUsed;
+    })
+    .slice(0, 3)
+    .map((item) => ({
+      domain: item.domain,
+      liveTokensUsed: item.liveTokensUsed,
+      reductionGap: item.reductionGap,
+      wasteScore: item.wasteScore,
+      cheapestVariant: item.cheapestVariant
+    }));
+}
+
+function buildSafeSavingsOpportunities(domainDiagnostics) {
+  return [...domainDiagnostics]
+    .filter((item) => item.shouldTightenValueGate)
+    .sort((left, right) => {
+      if (right.wasteScore !== left.wasteScore) {
+        return right.wasteScore - left.wasteScore;
+      }
+      return right.saverTrendStreak - left.saverTrendStreak;
+    })
+    .slice(0, 3)
+    .map((item) => ({
+      domain: item.domain,
+      currentThreshold: item.configuredThreshold,
+      suggestedThreshold: item.suggestedThreshold,
+      liveTokensUsed: item.liveTokensUsed,
+      saverTrendStreak: item.saverTrendStreak,
+      reductionGap: item.reductionGap,
+      action: `Raise minScoreByDomain.${item.domain} to ${item.suggestedThreshold}`
+    }));
 }
 
 function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSummary) {
