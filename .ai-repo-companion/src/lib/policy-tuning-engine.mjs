@@ -7,24 +7,31 @@ import { appendLine, readJson, writeJson } from "./store.mjs";
 // It only suggests a handful of bounded changes so the repo owner can nudge
 // the system with data instead of rewriting policy by gut feel.
 
-export async function analyzePolicyTuning(rootDir) {
+export async function analyzePolicyTuning(rootDir, options = {}) {
   const configPath = path.join(rootDir, "config/system.json");
   const benchmarkPath = path.join(rootDir, "state/benchmarks/last-benchmark.json");
   const config = await readJson(configPath, {});
   const metrics = await getReviewMetrics(rootDir);
   const benchmark = await readJson(benchmarkPath, null);
-  const suggestions = buildPolicySuggestions(config, metrics, benchmark);
-  const tuningPlan = buildTuningPlan(suggestions);
+  const allSuggestions = buildPolicySuggestions(config, metrics, benchmark);
+  const fullTuningPlan = buildTuningPlan(allSuggestions);
+  const selectedPhase = options.phase ?? null;
+  const suggestions = filterSuggestionsByPhase(allSuggestions, fullTuningPlan, selectedPhase);
+  const tuningPlan = selectedPhase
+    ? buildTuningPlan(suggestions)
+    : fullTuningPlan;
 
   return {
     configPath,
     benchmarkPath,
     metrics,
     benchmark,
+    selectedPhase,
     suggestions,
     tuningPlan,
     summary: {
       benchmarkLoaded: Boolean(benchmark?.aggregate),
+      selectedPhase,
       suggestionCount: suggestions.length,
       applyableCount: suggestions.filter((item) => item.canApply).length,
       autoApplicableCount: suggestions.filter((item) => item.canAutoApply).length,
@@ -33,8 +40,8 @@ export async function analyzePolicyTuning(rootDir) {
   };
 }
 
-export async function applyPolicyTuning(rootDir) {
-  const analysis = await analyzePolicyTuning(rootDir);
+export async function applyPolicyTuning(rootDir, options = {}) {
+  const analysis = await analyzePolicyTuning(rootDir, options);
   const config = await readJson(analysis.configPath, {});
   const applied = [];
 
@@ -61,9 +68,9 @@ export async function applyPolicyTuning(rootDir) {
   };
 }
 
-export async function runAutoPolicyTuning(rootDir) {
+export async function runAutoPolicyTuning(rootDir, options = {}) {
   const reconciliation = await reconcileAutoPolicyTuning(rootDir, { silentNoop: true });
-  const analysis = await analyzePolicyTuning(rootDir);
+  const analysis = await analyzePolicyTuning(rootDir, { phase: options.phase ?? null });
   const config = await readJson(analysis.configPath, {});
   const tuningConfig = config.tuning ?? {};
   const statePath = path.join(rootDir, "state/tuning/auto-tune-state.json");
@@ -146,6 +153,7 @@ export async function runAutoPolicyTuning(rootDir) {
     ...analysis,
     mode: "auto",
     enabled: true,
+    selectedPhase: analysis.selectedPhase,
     cooldownMinutes,
     maxAutoApplySuggestionsPerRun,
     applied,
@@ -167,7 +175,9 @@ export async function runAutoPolicyTuning(rootDir) {
   await writeJson(lastTuningPath, {
     generatedAt: now,
     mode: "auto",
+    selectedPhase: analysis.selectedPhase,
     summary: {
+      selectedPhase: analysis.selectedPhase,
       suggestionCount: analysis.summary.suggestionCount,
       applyableCount: analysis.summary.applyableCount,
       autoApplicableCount: candidates.filter((item) => item.canAutoApply).length,
@@ -708,6 +718,18 @@ function buildTuningPlan(suggestions) {
       ? `Start with ${steps[0].title.toLowerCase()} before moving to broader policy changes.`
       : "No bounded tuning plan is needed right now."
   };
+}
+
+function filterSuggestionsByPhase(suggestions, tuningPlan, selectedPhase) {
+  if (!selectedPhase) {
+    return suggestions;
+  }
+  const phase = tuningPlan.steps.find((step) => step.phase === selectedPhase);
+  if (!phase) {
+    return [];
+  }
+  const ids = new Set(phase.suggestionIds);
+  return suggestions.filter((item) => ids.has(item.id));
 }
 
 function summarizePlanStepImpact(suggestions) {
