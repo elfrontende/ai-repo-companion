@@ -406,6 +406,7 @@ function buildPolicySuggestions(config, metrics, benchmark) {
   // does not overreact to one noisy day of real runs.
   const balancedVariant = benchmark?.aggregate?.byVariant?.balanced;
   const saverVariant = benchmark?.aggregate?.byVariant?.saver;
+  const balancedVsSaverTokenDelta = Number(balancedVariant?.totalTokens ?? 0) - Number(saverVariant?.totalTokens ?? 0);
   const domainSignal = buildDomainLeanSignal(
     benchmark?.aggregate?.byDomain ?? {},
     config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"],
@@ -427,7 +428,15 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     currentValue: config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium",
     proposedValue: "low",
     canAutoApply: true,
-    priority: domainSignal.shouldLeanBalancedLane ? 75 : 50
+    priority: domainSignal.shouldLeanBalancedLane ? 75 : 50,
+    expectedImpact: {
+      type: "balanced-lane",
+      estimatedTokenDelta: Math.max(0, balancedVsSaverTokenDelta),
+      affectedDomains: domainSignal.matchedDomains,
+      reductionGap: Math.max(0, Number(
+        ((Number(saverVariant?.reductionPercent) || 0) - (Number(balancedVariant?.reductionPercent) || 0)).toFixed(2)
+      ))
+    }
   });
 
   maybePushSuggestion(suggestions, {
@@ -444,7 +453,15 @@ function buildPolicySuggestions(config, metrics, benchmark) {
     currentValue: config.reviewExecution?.reviewProfiles?.balanced?.maxOperations ?? 2,
     proposedValue: 1,
     canAutoApply: true,
-    priority: domainSignal.shouldLeanBalancedLane ? 78 : 52
+    priority: domainSignal.shouldLeanBalancedLane ? 78 : 52,
+    expectedImpact: {
+      type: "balanced-lane",
+      estimatedTokenDelta: Math.max(0, balancedVsSaverTokenDelta),
+      affectedDomains: domainSignal.matchedDomains,
+      reductionGap: Math.max(0, Number(
+        ((Number(saverVariant?.reductionPercent) || 0) - (Number(balancedVariant?.reductionPercent) || 0)).toFixed(2)
+      ))
+    }
   });
 
   for (const domain of domainSignal.matchedDomains) {
@@ -462,7 +479,15 @@ function buildPolicySuggestions(config, metrics, benchmark) {
       currentValue: currentStoredValue,
       proposedValue: Math.min(90, effectiveThreshold + 5),
       canAutoApply: true,
-      priority: domainSignal.domainPriorities[domain] ?? 50
+      priority: domainSignal.domainPriorities[domain] ?? 50,
+      expectedImpact: {
+        type: "domain-value-gate",
+        domain,
+        liveTokensUsed: Number(metrics?.tokensByDomain?.[domain]) || 0,
+        reductionGap: Number((Number(benchmark?.aggregate?.byDomain?.[domain]?.byVariant?.saver?.reductionPercent ?? 0)
+          - Number(benchmark?.aggregate?.byDomain?.[domain]?.byVariant?.balanced?.reductionPercent ?? 0)).toFixed(2)),
+        thresholdDelta: Math.max(0, Math.min(90, effectiveThreshold + 5) - effectiveThreshold)
+      }
     });
   }
 
@@ -625,6 +650,7 @@ function maybePushSuggestion(suggestions, suggestion) {
     path: suggestion.path,
     currentValue: suggestion.currentValue,
     proposedValue: suggestion.proposedValue,
+    expectedImpact: suggestion.expectedImpact ?? null,
     priority: Number(suggestion.priority) || 0,
     canApply: suggestion.currentValue !== suggestion.proposedValue,
     canAutoApply: suggestion.currentValue !== suggestion.proposedValue && suggestion.canAutoApply === true
@@ -674,12 +700,33 @@ function buildTuningPlan(suggestions) {
       phase: step.phase,
       title: step.title,
       suggestionIds: step.suggestions.map((item) => item.id),
+      expectedImpact: summarizePlanStepImpact(step.suggestions),
       autoApplicableCount: step.suggestions.filter((item) => item.canAutoApply).length,
       applyableCount: step.suggestions.filter((item) => item.canApply).length
     })),
     recommendation: steps[0]
       ? `Start with ${steps[0].title.toLowerCase()} before moving to broader policy changes.`
       : "No bounded tuning plan is needed right now."
+  };
+}
+
+function summarizePlanStepImpact(suggestions) {
+  const domainImpacts = suggestions
+    .map((item) => item.expectedImpact)
+    .filter((impact) => impact?.type === "domain-value-gate");
+  const balancedImpacts = suggestions
+    .map((item) => item.expectedImpact)
+    .filter((impact) => impact?.type === "balanced-lane");
+
+  return {
+    domains: domainImpacts.map((impact) => ({
+      domain: impact.domain,
+      liveTokensUsed: impact.liveTokensUsed,
+      reductionGap: impact.reductionGap,
+      thresholdDelta: impact.thresholdDelta
+    })),
+    estimatedTokenDelta: balancedImpacts.reduce((total, impact) => total + (Number(impact.estimatedTokenDelta) || 0), 0),
+    affectedDomains: [...new Set(balancedImpacts.flatMap((impact) => impact.affectedDomains ?? []))]
   };
 }
 
