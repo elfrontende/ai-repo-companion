@@ -76,6 +76,7 @@ function buildControls(status, doctor, tuning) {
 function buildEvidence(status, doctor, tuning) {
   const tuningComparison = status.benchmarkSummary.tuningComparison ?? {};
   const cycleWindow = status.benchmarkCycleSummary.windowComparison ?? {};
+  const multiCycle = status.benchmarkCycleSummary.multiCycle ?? {};
   return {
     benchmark: {
       cheapestVariant: status.benchmarkSummary.cheapestVariant,
@@ -113,6 +114,20 @@ function buildEvidence(status, doctor, tuning) {
       currentWindowAverage: cycleWindow.currentWindowAverage ?? null,
       previousWindowAverage: cycleWindow.previousWindowAverage ?? null,
       summary: cycleWindow.recommendation ?? "No cycle window comparison is available yet."
+    },
+    longRun: {
+      recentCycleCount: multiCycle.recentCycleCount ?? 0,
+      trendDirection: status.benchmarkCycleSummary.trendDirection,
+      latestOutcomeStreak: status.benchmarkCycleSummary.latestOutcomeStreak,
+      averageBalancedDelta: status.benchmarkCycleSummary.averageBalancedDelta,
+      averageRollbackCount: status.benchmarkCycleSummary.averageRollbackCount,
+      windowComparison: {
+        direction: cycleWindow.direction ?? null,
+        delta: cycleWindow.delta ?? null,
+        summary: cycleWindow.recommendation ?? "No cycle window comparison is available yet."
+      },
+      confidence: buildConfidenceCard(status.benchmarkCycleSummary.confidence),
+      summary: buildLongRunSummary(status.benchmarkCycleSummary)
     },
     tuningPhases: (tuning.tuningPlan?.steps ?? []).slice(0, 3).map(buildPhaseEvidenceCard),
     diagnostics: {
@@ -188,4 +203,19 @@ function summarizePhaseDeltaHint(expectedImpact) {
     return `Raises local thresholds by about ${thresholdDelta} points.`;
   }
   return "Expected impact is directional but not yet strong enough for a numeric delta hint.";
+}
+
+function buildLongRunSummary(benchmarkCycleSummary) {
+  const trendDirection = benchmarkCycleSummary.trendDirection ?? "mixed";
+  const averageBalancedDelta = Number(benchmarkCycleSummary.averageBalancedDelta) || 0;
+  const latestOutcomeStreak = Number(benchmarkCycleSummary.latestOutcomeStreak) || 0;
+  const confidence = benchmarkCycleSummary.confidence?.level ?? "low";
+
+  if (trendDirection === "improving") {
+    return `Long-run cycle evidence is ${confidence} confidence and improving, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} across the recent window and a streak of ${latestOutcomeStreak}.`;
+  }
+  if (trendDirection === "degrading") {
+    return `Long-run cycle evidence is ${confidence} confidence and degrading, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} and a streak of ${latestOutcomeStreak}.`;
+  }
+  return `Long-run cycle evidence is ${confidence} confidence and still mixed, so recent benchmark windows should be treated as directional rather than conclusive.`;
 }

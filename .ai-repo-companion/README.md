@@ -212,6 +212,7 @@ Daily ergonomics are better now too:
 - `status` and `doctor` now also return compact summary blocks like `whyExpensive`, `whyTuneNow`, and `whyQueueBlocked`, so the operator can scan the control-plane state without reading the full diagnostics tree
 - `report` packages the same runtime signals into `overview`, `economics`, `controls`, and `evidence`, so daily operator checks do not require walking multiple command trees
 - `report` now also includes compact `beforeAfter`, `rollback`, and per-phase `tuningPhases` evidence cards, so an operator can see what changed, what was rolled back, and which tuning phase is supposed to move the economics next
+- `report` now also includes a `longRun` evidence card, so the operator can see the recent benchmark-cycle trend, window comparison, and confidence in one short block instead of reconstructing it from raw cycle history
 - ranked status and action items now also include compact `riskLevel` and `expected...` fields, so operators can judge likely savings versus blast radius without reading raw benchmark JSON
 - `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `doctor` also warns when a cheap domain like `docs` or `deploy` keeps favoring `saver` but its `minScoreByDomain` threshold is still too loose

@@ -1514,6 +1514,10 @@ assert.equal(runtimeReport.evidence.beforeAfter.cheapestVariantCurrent, "saver")
 assert.equal(runtimeReport.evidence.beforeAfter.confidence.level, "high");
 assert.equal(runtimeReport.evidence.rollback.canaryStatus, "accepted");
 assert.ok(Array.isArray(runtimeReport.evidence.rollback.recentAppliedPhases));
+assert.equal(runtimeReport.evidence.longRun.trendDirection, "improving");
+assert.equal(runtimeReport.evidence.longRun.windowComparison.direction, "improving");
+assert.equal(runtimeReport.evidence.longRun.confidence.level, "high");
+assert.match(runtimeReport.evidence.longRun.summary, /Long-run cycle evidence is high confidence and improving/i);
 assert.equal(runtimeReport.evidence.tuningPhases[0].phase, "cheap-domains");
 assert.ok(typeof runtimeReport.evidence.tuningPhases[0].deltaHint === "string");
 assert.equal(runtimeReport.evidence.cycles.windowDirection, "improving");
