@@ -1572,6 +1572,8 @@ assert.equal(runtimeReport.controls.tuningPreview[0].phase, "cheap-domains");
 assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaHint === "string");
 assert.ok(["low", "medium", "high"].includes(runtimeReport.controls.tuningPreview[0].confidence.level));
 assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaBreakdown.totalLiveTokensUsed === "number");
+assert.ok(Array.isArray(runtimeReport.controls.tuningPreview[0].deltaCard.affectedDomains));
+assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaCard.autoApplicableChanges === "number");
 assert.equal(runtimeReport.controls.workflowPreview[0].phase, "cheap-domains");
 assert.match(runtimeReport.controls.workflowPreview[0].commands.apply, /--phase cheap-domains/);
 assert.match(runtimeReport.controls.workflowPreview[0].recommendedLoop.join(" "), /benchmark/i);
@@ -1593,6 +1595,8 @@ assert.equal(runtimeReport.evidence.tuningPhases[0].phase, "cheap-domains");
 assert.ok(typeof runtimeReport.evidence.tuningPhases[0].deltaHint === "string");
 assert.ok(["low", "medium", "high"].includes(runtimeReport.evidence.tuningPhases[0].confidence.level));
 assert.ok(typeof runtimeReport.evidence.tuningPhases[0].deltaBreakdown.totalThresholdDelta === "number");
+assert.ok(Array.isArray(runtimeReport.evidence.tuningPhases[0].deltaCard.affectedDomains));
+assert.ok(typeof runtimeReport.evidence.tuningPhases[0].deltaCard.applyableChanges === "number");
 assert.equal(runtimeReport.evidence.cycles.windowDirection, "improving");
 assert.equal(runtimeReport.evidence.diagnostics.highestSeverity, "info");
 
