@@ -423,6 +423,8 @@ async function buildBenchmarkTrend(historyPath, trendWindow) {
   const latest = recent.at(-1) ?? null;
   const previous = recent.at(-2) ?? null;
   const cheapestVariantStreak = countCheapestVariantStreak(recent);
+  const deltaByVariant = buildVariantDelta(previous?.aggregate?.byVariant, latest?.aggregate?.byVariant);
+  const byDomain = buildDomainTrend(recent);
 
   return {
     historyEntries: entries.length,
@@ -434,8 +436,15 @@ async function buildBenchmarkTrend(historyPath, trendWindow) {
     })),
     cheapestVariantStreak,
     latestCheapestVariant: latest?.aggregate?.cheapestVariant ?? null,
-    deltaByVariant: buildVariantDelta(previous?.aggregate?.byVariant, latest?.aggregate?.byVariant),
-    byDomain: buildDomainTrend(recent),
+    deltaByVariant,
+    byDomain,
+    confidence: buildBenchmarkTrendConfidence({
+      historyEntries: entries.length,
+      trendWindow,
+      cheapestVariantStreak,
+      deltaByVariant,
+      byDomain
+    }),
     recommendation: buildTrendRecommendation(cheapestVariantStreak, latest?.aggregate?.cheapestVariant ?? null)
   };
 }
@@ -748,6 +757,13 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
     degradedCount: outcomeCounts.degraded ?? 0
   });
   const windowComparison = buildCycleWindowComparison(entries, comparisonWindow);
+  const confidence = buildBenchmarkCycleConfidence({
+    recentCycleCount: summaries.length,
+    latestOutcomeStreak,
+    trendDirection,
+    averageRollbackCount,
+    windowComparison
+  });
 
   return {
     available: true,
@@ -762,6 +778,7 @@ async function buildBenchmarkCycleComparison(historyPath, trendWindow, compariso
     outcomeCounts,
     trendDirection,
     windowComparison,
+    confidence,
     recommendation: buildCycleTrendRecommendation({
       trendDirection,
       latestOutcome: latest.outcome,
@@ -931,6 +948,13 @@ function buildTuningComparison(report, lastTuning, monitoredDomains) {
     balancedReductionPercentDelta,
     saverReductionPercentDelta,
     byDomain,
+    confidence: buildTuningComparisonConfidence({
+      balancedReductionPercentDelta,
+      saverReductionPercentDelta,
+      monitoredDomainCount: monitoredDomains.length,
+      improvedDomainCount: improvedDomains.length,
+      degradedDomainCount: degradedDomains.length
+    }),
     summary: buildTuningComparisonSummary(outcome, balancedReductionPercentDelta, degradedDomains, improvedDomains)
   };
 }
@@ -979,6 +1003,180 @@ function buildTuningComparisonSummary(outcome, balancedDelta, degradedDomains, i
     return `Post-tune benchmark improved by ${balancedDelta.toFixed(2)} balanced reduction points.`;
   }
   return "Post-tune benchmark is effectively flat so the latest tuning looks neutral.";
+}
+
+function buildBenchmarkTrendConfidence({
+  historyEntries,
+  trendWindow,
+  cheapestVariantStreak,
+  deltaByVariant,
+  byDomain
+}) {
+  let score = 0;
+  const reasons = [];
+  const noisyDomains = Object.values(byDomain ?? {}).filter((item) => item.isNoisy).length;
+  const totalDomains = Math.max(1, Object.keys(byDomain ?? {}).length);
+  const balancedDeltaMagnitude = Math.abs(Number(deltaByVariant?.balanced?.reductionPercentDelta) || 0);
+
+  if (historyEntries >= trendWindow) {
+    score += 35;
+    reasons.push("trend window is fully populated");
+  } else {
+    score += Math.min(25, historyEntries * 8);
+    reasons.push("trend window is only partially populated");
+  }
+
+  if ((cheapestVariantStreak?.count ?? 0) >= 3) {
+    score += 25;
+    reasons.push("cheapest variant stayed stable for at least three runs");
+  } else if ((cheapestVariantStreak?.count ?? 0) >= 2) {
+    score += 15;
+    reasons.push("cheapest variant has a short but usable streak");
+  } else {
+    reasons.push("cheapest variant still flips too often");
+  }
+
+  if (balancedDeltaMagnitude >= 2) {
+    score += 20;
+    reasons.push("balanced reduction delta is large enough to be directional");
+  } else if (balancedDeltaMagnitude >= 1) {
+    score += 10;
+    reasons.push("balanced reduction delta is modest but visible");
+  } else {
+    reasons.push("balanced reduction delta is still weak");
+  }
+
+  if (noisyDomains === 0) {
+    score += 20;
+    reasons.push("cheap-domain trend signals are stable");
+  } else if ((noisyDomains / totalDomains) <= 0.25) {
+    score += 10;
+    reasons.push("only a small fraction of cheap-domain signals are noisy");
+  } else {
+    reasons.push("too many cheap-domain signals are noisy");
+  }
+
+  return finalizeConfidence(score, reasons);
+}
+
+function buildBenchmarkCycleConfidence({
+  recentCycleCount,
+  latestOutcomeStreak,
+  trendDirection,
+  averageRollbackCount,
+  windowComparison
+}) {
+  let score = 0;
+  const reasons = [];
+
+  if (recentCycleCount >= 4) {
+    score += 30;
+    reasons.push("multiple benchmark cycles are available");
+  } else if (recentCycleCount >= 2) {
+    score += 15;
+    reasons.push("only a short cycle history is available");
+  } else {
+    reasons.push("cycle history is still too short");
+  }
+
+  if (windowComparison?.available) {
+    score += 25;
+    reasons.push("window-to-window comparison is available");
+  } else {
+    reasons.push("window-to-window comparison is not available yet");
+  }
+
+  if (trendDirection === "improving" || trendDirection === "degrading") {
+    score += 20;
+    reasons.push("cycle direction is clear instead of mixed");
+  } else {
+    reasons.push("cycle direction is still mixed");
+  }
+
+  if ((latestOutcomeStreak ?? 0) >= 2) {
+    score += 15;
+    reasons.push("recent cycle outcomes are repeating consistently");
+  } else {
+    reasons.push("recent cycle outcomes have not formed a stable streak");
+  }
+
+  if ((averageRollbackCount ?? 0) <= 0.5) {
+    score += 10;
+    reasons.push("rollback pressure is low");
+  } else {
+    reasons.push("rollback pressure is elevated");
+  }
+
+  return finalizeConfidence(score, reasons);
+}
+
+function buildTuningComparisonConfidence({
+  balancedReductionPercentDelta,
+  saverReductionPercentDelta,
+  monitoredDomainCount,
+  improvedDomainCount,
+  degradedDomainCount
+}) {
+  let score = 0;
+  const reasons = [];
+  const dominantDelta = Math.max(
+    Math.abs(Number(balancedReductionPercentDelta) || 0),
+    Math.abs(Number(saverReductionPercentDelta) || 0)
+  );
+
+  if (monitoredDomainCount >= 4) {
+    score += 30;
+    reasons.push("all monitored cheap domains are covered");
+  } else if (monitoredDomainCount >= 2) {
+    score += 15;
+    reasons.push("only part of the cheap-domain set is covered");
+  } else {
+    reasons.push("too few monitored domains are available");
+  }
+
+  if (dominantDelta >= 3) {
+    score += 25;
+    reasons.push("post-tune token delta is large enough to be convincing");
+  } else if (dominantDelta >= 1) {
+    score += 10;
+    reasons.push("post-tune token delta is visible but still modest");
+  } else {
+    reasons.push("post-tune token delta is still weak");
+  }
+
+  if (improvedDomainCount > 0 && degradedDomainCount === 0) {
+    score += 25;
+    reasons.push("monitored domains improve without visible regressions");
+  } else if (degradedDomainCount === 0) {
+    score += 10;
+    reasons.push("no monitored domains regress after tuning");
+  } else {
+    reasons.push("one or more monitored domains regress after tuning");
+  }
+
+  if (degradedDomainCount === 0) {
+    score += 20;
+    reasons.push("rollback evidence does not point to harm");
+  } else {
+    reasons.push("rollback evidence suggests tuning harm is possible");
+  }
+
+  return finalizeConfidence(score, reasons);
+}
+
+function finalizeConfidence(score, reasons) {
+  const normalizedScore = Math.max(0, Math.min(100, Math.round(score)));
+  const level = normalizedScore >= 75
+    ? "high"
+    : normalizedScore >= 45
+      ? "medium"
+      : "low";
+
+  return {
+    score: normalizedScore,
+    level,
+    reasons
+  };
 }
 
 function toFixedDelta(currentValue, baselineValue) {

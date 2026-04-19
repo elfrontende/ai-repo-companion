@@ -106,6 +106,14 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  if (benchmarkSummary.loaded && benchmarkSummary.confidence?.level === "low") {
+    findings.push({
+      severity: "info",
+      code: "benchmark-confidence-low",
+      message: `Synthetic benchmark confidence is low: ${benchmarkSummary.confidence.reasons?.[0] ?? "benchmark evidence is still thin"}.`
+    });
+  }
+
   if (!benchmarkCycleSummary.loaded) {
     findings.push({
       severity: "info",
@@ -117,6 +125,14 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
       severity: "info",
       code: "benchmark-cycle-stale",
       message: "The last benchmark cycle is stale. Refresh a multi-iteration cycle before making long-run tuning decisions."
+    });
+  }
+
+  if (benchmarkCycleSummary.loaded && benchmarkCycleSummary.confidence?.level === "low") {
+    findings.push({
+      severity: "info",
+      code: "benchmark-cycle-confidence-low",
+      message: `Benchmark-cycle confidence is low: ${benchmarkCycleSummary.confidence.reasons?.[0] ?? "cycle evidence is still thin"}.`
     });
   }
 
@@ -289,6 +305,11 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
     topWasteDomains,
     safeSavingsOpportunities,
     domainTrend: benchmark?.trend?.byDomain ?? {},
+    confidence: benchmark?.trend?.confidence ?? {
+      score: 0,
+      level: "low",
+      reasons: ["benchmark trend confidence is unavailable"]
+    },
     tuningComparison: benchmark?.tuningComparison ?? null
   };
 }
@@ -320,6 +341,11 @@ async function readBenchmarkCycleSummary(rootDir, config = {}) {
     latestVsPreviousBalancedDelta: multiCycle.latestVsPreviousBalancedDelta ?? null,
     outcomeCounts: multiCycle.outcomeCounts ?? {},
     windowComparison: multiCycle.windowComparison ?? { available: false, reason: "no-window-comparison" },
+    confidence: multiCycle.confidence ?? {
+      score: 0,
+      level: "low",
+      reasons: ["benchmark cycle confidence is unavailable"]
+    },
     recommendation: multiCycle.recommendation ?? benchmarkCycle?.summary?.recommendation ?? null,
     multiCycle
   };
@@ -657,6 +683,11 @@ function buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchm
       : queue.queued > 0
         ? `${queue.queued} queued job(s) are still waiting for worker capacity or policy conditions.`
         : "The queue is not currently blocked.",
+    whyConfident: benchmarkCycleSummary.confidence?.level === "high"
+      ? `Long-run cycle confidence is high because ${benchmarkCycleSummary.confidence.reasons?.[0] ?? "the recent benchmark windows are stable"}.`
+      : benchmarkSummary.confidence?.level === "high"
+        ? `Benchmark confidence is high because ${benchmarkSummary.confidence.reasons?.[0] ?? "the synthetic trend is stable"}.`
+        : `Confidence is still ${benchmarkCycleSummary.confidence?.level ?? benchmarkSummary.confidence?.level ?? "low"} because ${benchmarkCycleSummary.confidence?.reasons?.[0] ?? benchmarkSummary.confidence?.reasons?.[0] ?? "recent benchmark evidence is thin or noisy"}.`,
     whyNotTuneHarder: benchmarkSummary.domainDiagnostics.some((item) => item.isNoisy)
       ? "At least one cheap domain is still noisy, so aggressive tightening would overreact to unstable benchmark evidence."
       : tuningSummary.canaryStatus === "pending"
