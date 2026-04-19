@@ -716,6 +716,11 @@ assert.ok(tuningAnalysis.tuningPlan.steps[1].expectedImpact.estimatedTokenDelta 
 assert.equal(tuningAnalysis.tuningPlan.steps[1].riskLevel, "medium");
 assert.match(tuningAnalysis.tuningPlan.steps[1].expectedImpactSummary, /balanced-lane/i);
 assert.match(tuningAnalysis.tuningPlan.steps[1].whyThisPhase, /extra tokens/i);
+assert.equal(tuningAnalysis.workflow.phases[0].phase, "cheap-domains");
+assert.ok(["ready", "manual", "watch"].includes(tuningAnalysis.workflow.phases[0].readyState));
+assert.ok(typeof tuningAnalysis.workflow.phases[0].objective === "string");
+assert.ok(typeof tuningAnalysis.workflow.phases[0].gatingReason === "string");
+assert.ok(typeof tuningAnalysis.workflow.phases[0].expectedDeltaCard.applyableChanges === "number");
 assert.equal(
   tuningAnalysis.suggestions.find((item) => item.id === "domain-tighten-value-gate-docs").expectedImpact.domain,
   "docs"
@@ -1602,6 +1607,10 @@ assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaBreakdown.totalLiv
 assert.ok(Array.isArray(runtimeReport.controls.tuningPreview[0].deltaCard.affectedDomains));
 assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaCard.autoApplicableChanges === "number");
 assert.equal(runtimeReport.controls.workflowPreview[0].phase, "cheap-domains");
+assert.ok(typeof runtimeReport.controls.workflowPreview[0].objective === "string");
+assert.ok(["ready", "manual", "watch"].includes(runtimeReport.controls.workflowPreview[0].readyState));
+assert.ok(typeof runtimeReport.controls.workflowPreview[0].gatingReason === "string");
+assert.ok(typeof runtimeReport.controls.workflowPreview[0].expectedDeltaCard.autoApplicableChanges === "number");
 assert.match(runtimeReport.controls.workflowPreview[0].commands.apply, /--phase cheap-domains/);
 assert.match(runtimeReport.controls.workflowPreview[0].recommendedLoop.join(" "), /benchmark/i);
 assert.equal(runtimeReport.evidence.beforeAfter.cheapestVariantCurrent, "saver");

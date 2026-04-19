@@ -964,7 +964,11 @@ function buildTuningWorkflow(tuningPlan, selectedPhase) {
     title: step.title,
     riskLevel: step.riskLevel,
     confidence: step.confidence,
+    objective: inferWorkflowObjective(step.phase, step.expectedImpact, step.deltaBreakdown),
+    readyState: inferWorkflowReadyState(step),
+    gatingReason: inferWorkflowGatingReason(step),
     deltaBreakdown: step.deltaBreakdown,
+    expectedDeltaCard: buildWorkflowDeltaCard(step.expectedImpact, step.deltaBreakdown),
     expectedImpactSummary: step.expectedImpactSummary,
     whyThisPhase: step.whyThisPhase,
     commands: {
@@ -988,6 +992,53 @@ function buildTuningWorkflow(tuningPlan, selectedPhase) {
       ? `Work only the ${selectedPhase} phase, then re-benchmark before moving to the next phase.`
       : "Work phases in order: preview, apply one phase, benchmark, then reconcile before widening the blast radius.",
     phases
+  };
+}
+
+function inferWorkflowObjective(phase, expectedImpact, deltaBreakdown) {
+  if (phase === "cheap-domains") {
+    return `Tighten cheap-domain gates first so weak low-risk review jobs stop before they reach the live lane.`;
+  }
+  if (phase === "balanced-lane") {
+    return `Lean the balanced lane so medium-risk review work stays cheaper without touching the expensive path.`;
+  }
+  if (phase === "global-policy") {
+    return `Adjust broader runtime pressure only after cheap-domain and balanced-lane fixes stop most obvious waste.`;
+  }
+  return `Revisit manual checkpoints after the automated cheap savings phases are stable.`;
+}
+
+function inferWorkflowReadyState(step) {
+  if ((step.applyableCount ?? 0) === 0) {
+    return "watch";
+  }
+  if ((step.autoApplicableCount ?? 0) > 0) {
+    return "ready";
+  }
+  return "manual";
+}
+
+function inferWorkflowGatingReason(step) {
+  if ((step.applyableCount ?? 0) === 0) {
+    return "No bounded change is currently applyable in this phase, so the operator should wait for fresher benchmark evidence.";
+  }
+  if ((step.autoApplicableCount ?? 0) > 0) {
+    return "At least one bounded change in this phase is auto-applicable, so this phase is ready for a preview/apply cycle.";
+  }
+  return "This phase has applyable changes, but they still require a manual checkpoint rather than auto-apply.";
+}
+
+function buildWorkflowDeltaCard(expectedImpact, deltaBreakdown) {
+  return {
+    estimatedTokenDelta: Number(expectedImpact?.estimatedTokenDelta) || 0,
+    affectedDomainCount: Array.isArray(expectedImpact?.domains)
+      ? expectedImpact.domains.length
+      : Array.isArray(expectedImpact?.affectedDomains)
+        ? expectedImpact.affectedDomains.length
+        : 0,
+    totalThresholdDelta: Number(deltaBreakdown?.totalThresholdDelta) || 0,
+    applyableChanges: Number(deltaBreakdown?.applyableChanges) || 0,
+    autoApplicableChanges: Number(deltaBreakdown?.autoApplicableChanges) || 0
   };
 }
 
