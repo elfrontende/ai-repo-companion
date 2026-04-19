@@ -213,12 +213,14 @@ This is the operator-facing layer: fewer manual file inspections, more direct an
 Synthetic validation is built in too:
 
 - `node src/cli.mjs benchmark` runs a small local suite of tasks with mixed difficulty
+- `node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns` runs a longer local canary loop, optionally auto-tuning between benchmark passes
 - each sample compares `saver`, `balanced`, and `strict` system variants against a naive `baseline` that always drags the full note set
 - reports are written to `state/benchmarks/last-benchmark.json`
 - benchmark history is appended to `state/benchmarks/history.jsonl`, trimmed by retention, and summarized into a trend block with cheapest-variant streaks and simple recommendations
 - benchmark aggregate data now also includes `byDomain`, so cheaper lanes can be evaluated per domain instead of only through one global total
 - the trend block now also persists per-domain cheapest-variant streaks, so tuning can distinguish a stable `docs` cost problem from one noisy benchmark run
 - each benchmark report now also stores a `tuningComparison` block when a previous tune baseline exists, so the operator can see whether the latest benchmark actually improved or degraded after tuning
+- benchmark cycles also return a compact summary for first-vs-last economics, accepted canaries, and rollback counts across the loop
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 

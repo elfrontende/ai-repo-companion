@@ -13,7 +13,7 @@ import { runTaskFlow } from "./lib/task-flow-engine.mjs";
 import { summarizeReviewMetrics } from "./lib/review-metrics-engine.mjs";
 import { analyzePolicyTuning, applyPolicyTuning, reconcileAutoPolicyTuning, runAutoPolicyTuning } from "./lib/policy-tuning-engine.mjs";
 import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.mjs";
-import { runSyntheticBenchmark } from "./lib/benchmark-engine.mjs";
+import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "./lib/benchmark-engine.mjs";
 import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -67,7 +67,7 @@ switch (command) {
     output(await runDoctor());
     break;
   case "benchmark":
-    output(await runBenchmark());
+    output(await runBenchmark(args));
     break;
   case "metrics":
     output(await runMetrics());
@@ -177,11 +177,17 @@ async function runDoctor() {
   };
 }
 
-async function runBenchmark() {
+async function runBenchmark(args = {}) {
+  const iterations = Math.max(1, Number(args.iterations) || 1);
   return {
     rootDir,
     mode: "benchmark",
-    benchmark: await runSyntheticBenchmark(rootDir, systemConfig)
+    benchmark: iterations > 1
+      ? await runSyntheticBenchmarkCycle(rootDir, {
+        iterations,
+        autoTuneBetweenRuns: args.autoTuneBetweenRuns === true
+      })
+      : await runSyntheticBenchmark(rootDir, systemConfig)
   };
 }
 
@@ -344,6 +350,7 @@ function helpText() {
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
       "node src/cli.mjs benchmark",
+      "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
       "node src/cli.mjs tune --apply",
