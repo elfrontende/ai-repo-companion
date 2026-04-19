@@ -211,6 +211,7 @@ Daily ergonomics are better now too:
 - ranked status items now also include short explanation fields like `whyRanked` and `whyNow`, so the operator can quickly see why a domain or action is currently prioritized
 - `status` and `doctor` now also return compact summary blocks like `whyExpensive`, `whyTuneNow`, and `whyQueueBlocked`, so the operator can scan the control-plane state without reading the full diagnostics tree
 - `report` packages the same runtime signals into `overview`, `economics`, `controls`, and `evidence`, so daily operator checks do not require walking multiple command trees
+- `report` now also includes compact `beforeAfter`, `rollback`, and per-phase `tuningPhases` evidence cards, so an operator can see what changed, what was rolled back, and which tuning phase is supposed to move the economics next
 - ranked status and action items now also include compact `riskLevel` and `expected...` fields, so operators can judge likely savings versus blast radius without reading raw benchmark JSON
 - `doctor` now warns when the benchmark is stale, when `saver` is consistently cheaper than the current balanced lane, or when the last auto-tune is stale
 - `doctor` also warns when a cheap domain like `docs` or `deploy` keeps favoring `saver` but its `minScoreByDomain` threshold is still too loose
@@ -246,6 +247,7 @@ Policy tuning is now metrics-aware:
 - tuning suggestions and tuning-plan steps now also include small `expectedImpact` previews, so the operator can see which domains or token deltas each bounded change is targeting
 - tuning-plan steps now also include `whyThisPhase`, so the operator can see why cheap-domain fixes should land before broader lane changes
 - tuning suggestions and phases now also expose compact impact/risk summaries, so `tune` shows both likely savings and likely blast radius before anything is applied
+- tuning previews now also flow into `report`, including per-phase delta hints, so the operator can compare the planned cheap-domain and balanced-lane moves without opening the full tuning JSON
 - tune analysis now also returns a small `workflow` block per phase, including `preview/apply/auto/benchmark/reconcile` commands, so operators can run bounded tuning as a repeatable loop instead of as raw config mutations
 - `tune`, `tune --apply`, and `tune --auto` now support `--phase cheap-domains|balanced-lane|global-policy|manual-checkpoints` for bounded phase-by-phase execution
 - `tune --reconcile` now also supports `--phase ...`, so a regressing canary can roll back only the risky phase first instead of discarding the entire bounded tune set at once

@@ -1355,7 +1355,13 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
   tuningComparison: {
     available: true,
     outcome: "improved",
+    cheapestVariant: {
+      baseline: "saver",
+      current: "saver",
+      changed: false
+    },
     balancedReductionPercentDelta: 6.75,
+    saverReductionPercentDelta: 4.5,
     confidence: {
       score: 80,
       level: "high",
@@ -1502,6 +1508,14 @@ assert.equal(runtimeReport.overview.confidence.benchmark.level, "high");
 assert.equal(runtimeReport.overview.confidence.cycles.level, "high");
 assert.equal(runtimeReport.economics.topWasteDomains[0].domain, "docs");
 assert.equal(runtimeReport.controls.nextActions[0].action, "node src/cli.mjs tune --auto");
+assert.equal(runtimeReport.controls.tuningPreview[0].phase, "cheap-domains");
+assert.ok(typeof runtimeReport.controls.tuningPreview[0].deltaHint === "string");
+assert.equal(runtimeReport.evidence.beforeAfter.cheapestVariantCurrent, "saver");
+assert.equal(runtimeReport.evidence.beforeAfter.confidence.level, "high");
+assert.equal(runtimeReport.evidence.rollback.canaryStatus, "accepted");
+assert.ok(Array.isArray(runtimeReport.evidence.rollback.recentAppliedPhases));
+assert.equal(runtimeReport.evidence.tuningPhases[0].phase, "cheap-domains");
+assert.ok(typeof runtimeReport.evidence.tuningPhases[0].deltaHint === "string");
 assert.equal(runtimeReport.evidence.cycles.windowDirection, "improving");
 assert.equal(runtimeReport.evidence.diagnostics.highestSeverity, "info");
 
