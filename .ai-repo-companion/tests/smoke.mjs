@@ -1193,11 +1193,33 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
         }
       }
     }
+  },
+  tuningComparison: {
+    available: true,
+    outcome: "improved",
+    balancedReductionPercentDelta: 6.75,
+    summary: "Post-tune benchmark improved, led by docs."
   }
 });
 await writeJson(path.join(statusRoot, "state/tuning/last-tuning.json"), {
   generatedAt: new Date(Date.now() - 16 * 60 * 60 * 1000).toISOString(),
   mode: "auto",
+  canary: {
+    status: "accepted",
+    baselineBenchmark: {
+      generatedAt: new Date(Date.now() - 17 * 60 * 60 * 1000).toISOString(),
+      cheapestVariant: "saver",
+      balancedReductionPercent: 32,
+      saverReductionPercent: 41,
+      byDomain: {
+        docs: {
+          cheapestVariant: "saver",
+          balancedReductionPercent: 35,
+          saverReductionPercent: 42
+        }
+      }
+    }
+  },
   applied: [
     {
       id: "tighten-value-gate"
@@ -1219,6 +1241,7 @@ assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].shouldTightenVa
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].liveTokensUsed, 12000);
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].saverTrendStreak, 3);
 assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
+assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
@@ -1228,6 +1251,7 @@ assert.equal(runtimeDoctor.ok, true);
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "balanced-lane-heavier-than-benchmark"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "auto-tune-stale"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate-drift-docs"));
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "post-tune-benchmark-improved"));
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
@@ -1282,6 +1306,42 @@ await ensureWorkspace(benchmarkRoot);
 const benchmarkConfig = await readJson(path.join(benchmarkRoot, "config/system.json"), {});
 benchmarkConfig.tuning.benchmarkHistoryRetentionEntries = 3;
 benchmarkConfig.tuning.benchmarkTrendWindow = 3;
+await writeJson(path.join(benchmarkRoot, "state/tuning/last-tuning.json"), {
+  generatedAt: "2026-04-17T00:00:00.000Z",
+  mode: "auto",
+  canary: {
+    status: "accepted",
+    baselineBenchmark: {
+      generatedAt: "2026-04-16T00:00:00.000Z",
+      cheapestVariant: "saver",
+      balancedReductionPercent: 20,
+      saverReductionPercent: 28,
+      byDomain: {
+        docs: {
+          cheapestVariant: "saver",
+          balancedReductionPercent: 22,
+          saverReductionPercent: 30
+        },
+        deploy: {
+          cheapestVariant: "saver",
+          balancedReductionPercent: 21,
+          saverReductionPercent: 29
+        },
+        ui: {
+          cheapestVariant: "balanced",
+          balancedReductionPercent: 24,
+          saverReductionPercent: 22
+        },
+        testing: {
+          cheapestVariant: "saver",
+          balancedReductionPercent: 20,
+          saverReductionPercent: 27
+        }
+      }
+    }
+  },
+  applied: []
+});
 
 let benchmarkResult;
 for (let index = 0; index < 4; index += 1) {
@@ -1306,6 +1366,10 @@ assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.variant, 
 assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.count, 3);
 assert.ok(typeof benchmarkReport.trend.byDomain.deploy.deltaByVariant.saver.totalTokensDelta === "number");
 assert.match(benchmarkReport.trend.recommendation, /Saver has been the cheapest variant/i);
+assert.equal(benchmarkReport.tuningComparison.available, true);
+assert.equal(benchmarkReport.tuningComparison.outcome, "improved");
+assert.ok(benchmarkReport.tuningComparison.balancedReductionPercentDelta > 0);
+assert.equal(benchmarkReport.tuningComparison.byDomain.docs.outcome, "improved");
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
 assert.equal(benchmarkHistory.trim().split("\n").length, 3);
 

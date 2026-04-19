@@ -3,7 +3,7 @@ import path from "node:path";
 import { loadNotes, assembleContext } from "./context-engine.mjs";
 import { classifyTask } from "./task-engine.mjs";
 import { evaluateMemoryPolicy } from "./policy-engine.mjs";
-import { appendLine, writeJson } from "./store.mjs";
+import { appendLine, readJson, writeJson } from "./store.mjs";
 import { applyReviewCostMode } from "./review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "./review-value-gate-engine.mjs";
 
@@ -98,6 +98,11 @@ export async function runSyntheticBenchmark(rootDir, config) {
   }));
   await trimBenchmarkHistory(historyPath, historyRetentionEntries);
   report.trend = await buildBenchmarkTrend(historyPath, trendWindow);
+  report.tuningComparison = buildTuningComparison(
+    report,
+    await readJson(path.join(rootDir, "state/tuning/last-tuning.json"), null),
+    config.tuning?.canaryDomains ?? ["docs", "deploy", "ui", "testing"]
+  );
   await writeJson(reportPath, report);
 
   return {
@@ -462,4 +467,119 @@ function buildTrendRecommendation(streak, latestVariant) {
     return "Balanced is currently the cheapest benchmark variant, so the default lane already matches the synthetic trend.";
   }
   return "Collect more benchmark history before changing the default cost lane purely from synthetic runs.";
+}
+
+function buildTuningComparison(report, lastTuning, monitoredDomains) {
+  const baseline = lastTuning?.canary?.baselineBenchmark ?? null;
+  const tuningGeneratedAt = lastTuning?.generatedAt ?? null;
+  if (!baseline) {
+    return {
+      available: false,
+      reason: "no-tuning-baseline"
+    };
+  }
+
+  const currentGeneratedAt = report?.generatedAt ?? null;
+  if (Date.parse(currentGeneratedAt ?? "") <= Date.parse(tuningGeneratedAt ?? "")) {
+    return {
+      available: false,
+      reason: "waiting-for-post-tune-benchmark",
+      tuningGeneratedAt,
+      baselineBenchmarkGeneratedAt: baseline.generatedAt ?? null,
+      currentBenchmarkGeneratedAt: currentGeneratedAt
+    };
+  }
+
+  const currentBalancedReduction = Number(report?.aggregate?.byVariant?.balanced?.reductionPercent);
+  const baselineBalancedReduction = Number(baseline?.balancedReductionPercent);
+  const currentSaverReduction = Number(report?.aggregate?.byVariant?.saver?.reductionPercent);
+  const baselineSaverReduction = Number(baseline?.saverReductionPercent);
+  const balancedReductionPercentDelta = toFixedDelta(currentBalancedReduction, baselineBalancedReduction);
+  const saverReductionPercentDelta = toFixedDelta(currentSaverReduction, baselineSaverReduction);
+  const byDomain = buildTuningComparisonByDomain(
+    report?.aggregate?.byDomain ?? {},
+    baseline?.byDomain ?? {},
+    monitoredDomains
+  );
+  const degradedDomains = Object.values(byDomain).filter((domain) => domain.outcome === "degraded");
+  const improvedDomains = Object.values(byDomain).filter((domain) => domain.outcome === "improved");
+  const cheapestVariantBaseline = baseline?.cheapestVariant ?? null;
+  const cheapestVariantCurrent = report?.aggregate?.cheapestVariant ?? null;
+
+  let outcome = "flat";
+  if ((Number.isFinite(balancedReductionPercentDelta) && balancedReductionPercentDelta <= -1) || degradedDomains.length > 0) {
+    outcome = "degraded";
+  } else if ((Number.isFinite(balancedReductionPercentDelta) && balancedReductionPercentDelta >= 1) || improvedDomains.length > 0) {
+    outcome = "improved";
+  }
+
+  return {
+    available: true,
+    tuningGeneratedAt,
+    baselineBenchmarkGeneratedAt: baseline.generatedAt ?? null,
+    currentBenchmarkGeneratedAt: currentGeneratedAt,
+    outcome,
+    cheapestVariant: {
+      baseline: cheapestVariantBaseline,
+      current: cheapestVariantCurrent,
+      changed: cheapestVariantBaseline !== cheapestVariantCurrent
+    },
+    balancedReductionPercentDelta,
+    saverReductionPercentDelta,
+    byDomain,
+    summary: buildTuningComparisonSummary(outcome, balancedReductionPercentDelta, degradedDomains, improvedDomains)
+  };
+}
+
+function buildTuningComparisonByDomain(currentByDomain, baselineByDomain, monitoredDomains) {
+  return Object.fromEntries(
+    monitoredDomains
+      .filter((domain) => currentByDomain?.[domain] && baselineByDomain?.[domain])
+      .map((domain) => {
+        const currentBalancedReduction = Number(currentByDomain?.[domain]?.byVariant?.balanced?.reductionPercent);
+        const baselineBalancedReduction = Number(baselineByDomain?.[domain]?.balancedReductionPercent);
+        const delta = toFixedDelta(currentBalancedReduction, baselineBalancedReduction);
+        let outcome = "flat";
+        if (Number.isFinite(delta) && delta <= -1) {
+          outcome = "degraded";
+        } else if (Number.isFinite(delta) && delta >= 1) {
+          outcome = "improved";
+        }
+        return [
+          domain,
+          {
+            domain,
+            baselineCheapestVariant: baselineByDomain?.[domain]?.cheapestVariant ?? null,
+            currentCheapestVariant: currentByDomain?.[domain]?.cheapestVariant ?? null,
+            balancedReductionPercentDelta: delta,
+            outcome
+          }
+        ];
+      })
+  );
+}
+
+function buildTuningComparisonSummary(outcome, balancedDelta, degradedDomains, improvedDomains) {
+  if (outcome === "degraded") {
+    const domainLabel = degradedDomains[0]?.domain ?? null;
+    if (domainLabel) {
+      return `Post-tune benchmark regressed in ${domainLabel}; review the last auto-tune or run reconcile.`;
+    }
+    return `Post-tune benchmark regressed by ${Math.abs(balancedDelta).toFixed(2)} balanced reduction points.`;
+  }
+  if (outcome === "improved") {
+    const domainLabel = improvedDomains[0]?.domain ?? null;
+    if (domainLabel) {
+      return `Post-tune benchmark improved, led by ${domainLabel}.`;
+    }
+    return `Post-tune benchmark improved by ${balancedDelta.toFixed(2)} balanced reduction points.`;
+  }
+  return "Post-tune benchmark is effectively flat so the latest tuning looks neutral.";
+}
+
+function toFixedDelta(currentValue, baselineValue) {
+  if (!Number.isFinite(currentValue) || !Number.isFinite(baselineValue)) {
+    return null;
+  }
+  return Number((currentValue - baselineValue).toFixed(2));
 }

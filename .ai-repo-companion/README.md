@@ -218,6 +218,7 @@ Synthetic validation is built in too:
 - benchmark history is appended to `state/benchmarks/history.jsonl`, trimmed by retention, and summarized into a trend block with cheapest-variant streaks and simple recommendations
 - benchmark aggregate data now also includes `byDomain`, so cheaper lanes can be evaluated per domain instead of only through one global total
 - the trend block now also persists per-domain cheapest-variant streaks, so tuning can distinguish a stable `docs` cost problem from one noisy benchmark run
+- each benchmark report now also stores a `tuningComparison` block when a previous tune baseline exists, so the operator can see whether the latest benchmark actually improved or degraded after tuning
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 

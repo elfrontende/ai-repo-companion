@@ -133,6 +133,22 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  if (benchmarkSummary.tuningComparison?.available && benchmarkSummary.tuningComparison.outcome === "degraded") {
+    findings.push({
+      severity: "warning",
+      code: "post-tune-benchmark-degraded",
+      message: benchmarkSummary.tuningComparison.summary
+    });
+  }
+
+  if (benchmarkSummary.tuningComparison?.available && benchmarkSummary.tuningComparison.outcome === "improved") {
+    findings.push({
+      severity: "info",
+      code: "post-tune-benchmark-improved",
+      message: benchmarkSummary.tuningComparison.summary
+    });
+  }
+
   for (const item of benchmarkSummary.domainDiagnostics.filter((entry) => entry.shouldTightenValueGate)) {
     findings.push({
       severity: "info",
@@ -205,7 +221,8 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
     saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
     domainDiagnostics,
-    domainTrend: benchmark?.trend?.byDomain ?? {}
+    domainTrend: benchmark?.trend?.byDomain ?? {},
+    tuningComparison: benchmark?.tuningComparison ?? null
   };
 }
 
