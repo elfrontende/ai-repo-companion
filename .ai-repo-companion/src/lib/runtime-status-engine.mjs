@@ -25,6 +25,7 @@ export async function getRuntimeStatus(rootDir, config = {}) {
     benchmarkCycleSummary,
     tuningSummary,
     nextActions: buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary),
+    compactSummary: buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary),
     recovery: await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null)
   };
 }
@@ -225,6 +226,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     benchmarkCycleSummary,
     tuningSummary,
     recommendedActions: buildDoctorRecommendedActions(findings),
+    compactSummary: buildDoctorCompactSummary(findings),
     recovery,
     lock: lock ?? {},
     findings
@@ -635,6 +637,52 @@ function buildDoctorRecommendedActions(findings) {
   return actions
     .sort((left, right) => right.priority - left.priority)
     .slice(0, 5);
+}
+
+function buildRuntimeCompactSummary(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary) {
+  return {
+    health: queue.awaitingApproval > 0
+      ? "Approval backlog is currently the main note-graph bottleneck."
+      : queue.running > 0
+        ? "A review worker is active, so queue state may still be moving."
+        : "Runtime looks stable and no immediate execution bottleneck is visible.",
+    whyExpensive: costSummary.liveTokensUsed > 0
+      ? `The heaviest current token pressure is in ${costSummary.highestCostDomain ?? "unknown-domain"} on the ${costSummary.highestCostMode ?? "unknown"} lane.`
+      : "No live token burn has been recorded yet in the current metrics window.",
+    whyTuneNow: benchmarkSummary.topWasteDomains[0]?.whyRanked
+      ?? benchmarkCycleSummary.recommendation
+      ?? "No strong tuning signal is available yet.",
+    whyQueueBlocked: queue.awaitingApproval > 0
+      ? `${queue.awaitingApproval} job(s) are waiting for approval before their note updates can be applied.`
+      : queue.queued > 0
+        ? `${queue.queued} queued job(s) are still waiting for worker capacity or policy conditions.`
+        : "The queue is not currently blocked.",
+    whyNotTuneHarder: benchmarkSummary.domainDiagnostics.some((item) => item.isNoisy)
+      ? "At least one cheap domain is still noisy, so aggressive tightening would overreact to unstable benchmark evidence."
+      : tuningSummary.canaryStatus === "pending"
+        ? "A pending canary still needs reconciliation before wider tuning changes are safe."
+        : "No major blocker is currently preventing another bounded tuning step."
+  };
+}
+
+function buildDoctorCompactSummary(findings) {
+  const highestSeverity = findings.some((item) => item.severity === "error")
+    ? "error"
+    : findings.some((item) => item.severity === "warning")
+      ? "warning"
+      : "info";
+  const topFinding = findings[0]?.message ?? "No actionable diagnostics were found.";
+  const expensiveFinding = findings.find((item) => item.code.includes("benchmark") || item.code.includes("balanced-lane"))?.message
+    ?? "No strong benchmark or cost warning is active.";
+  const recoveryFinding = findings.find((item) => item.code.includes("lock") || item.code.includes("recovery") || item.code.includes("approval"))?.message
+    ?? "No recovery or approval issue is currently blocking the runtime.";
+
+  return {
+    highestSeverity,
+    topFinding,
+    whyExpensive: expensiveFinding,
+    whyBlocked: recoveryFinding
+  };
 }
 
 function buildDomainSavingsHint(item) {

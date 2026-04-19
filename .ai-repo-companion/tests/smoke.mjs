@@ -1445,6 +1445,9 @@ assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto"
 assert.ok(typeof runtimeStatus.nextActions[0].whyNow === "string");
 assert.equal(runtimeStatus.nextActions[0].riskLevel, "low");
 assert.ok(typeof runtimeStatus.nextActions[0].expectedOutcome === "string");
+assert.match(runtimeStatus.compactSummary.whyExpensive, /docs|unknown-domain|No live token burn/i);
+assert.match(runtimeStatus.compactSummary.whyTuneNow, /cheap-domain waste signal|Recent benchmark cycles|No strong tuning signal/i);
+assert.match(runtimeStatus.compactSummary.whyQueueBlocked, /queued job|not currently blocked/i);
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
 
 const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
@@ -1460,6 +1463,9 @@ assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune 
 assert.ok(typeof runtimeDoctor.recommendedActions[0].whyNow === "string");
 assert.equal(runtimeDoctor.recommendedActions[0].riskLevel, "medium");
 assert.ok(typeof runtimeDoctor.recommendedActions[0].expectedOutcome === "string");
+assert.equal(runtimeDoctor.compactSummary.highestSeverity, "info");
+assert.ok(typeof runtimeDoctor.compactSummary.topFinding === "string");
+assert.ok(typeof runtimeDoctor.compactSummary.whyExpensive === "string");
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
   costMode: "saver",
