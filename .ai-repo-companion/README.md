@@ -252,6 +252,7 @@ Policy tuning is now metrics-aware:
 - tuning-plan steps now also include `whyThisPhase`, so the operator can see why cheap-domain fixes should land before broader lane changes
 - tuning suggestions and phases now also expose compact impact/risk summaries, so `tune` shows both likely savings and likely blast radius before anything is applied
 - tuning previews now also flow into `report`, including per-phase delta hints, so the operator can compare the planned cheap-domain and balanced-lane moves without opening the full tuning JSON
+- `report` now also includes a compact workflow preview per tuning phase, so the operator can copy the exact `preview -> apply -> benchmark -> reconcile` loop for the current bounded plan
 - tuning phases now also carry a compact confidence block and delta breakdown, so the operator can see how strong each phase signal is before applying or auto-running it
 - tune analysis now also returns a small `workflow` block per phase, including `preview/apply/auto/benchmark/reconcile` commands, so operators can run bounded tuning as a repeatable loop instead of as raw config mutations
 - `tune`, `tune --apply`, and `tune --auto` now support `--phase cheap-domains|balanced-lane|global-policy|manual-checkpoints` for bounded phase-by-phase execution
