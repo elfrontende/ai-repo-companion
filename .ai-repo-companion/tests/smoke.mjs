@@ -690,6 +690,7 @@ await writeJson(path.join(tuningRoot, "state/benchmarks/last-benchmark.json"), {
 
 const tuningAnalysis = await analyzePolicyTuning(tuningRoot);
 assert.equal(tuningAnalysis.summary.benchmarkLoaded, true);
+assert.equal(tuningAnalysis.summary.tuningPlanSteps >= 3, true);
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-domain-threshold"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-ranking-floor"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "tighten-value-gate"));
@@ -699,6 +700,9 @@ assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "domain-tighten-
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "domain-tighten-value-gate-deploy"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "raise-apply-budget"));
 assert.ok(tuningAnalysis.suggestions.some((item) => item.id === "extend-approval-ttl"));
+assert.equal(tuningAnalysis.tuningPlan.steps[0].phase, "cheap-domains");
+assert.ok(tuningAnalysis.tuningPlan.steps[0].suggestionIds.includes("domain-tighten-value-gate-docs"));
+assert.ok(tuningAnalysis.tuningPlan.steps[1].suggestionIds.includes("benchmark-lower-balanced-effort"));
 
 const tuningApply = await applyPolicyTuning(tuningRoot);
 assert.ok(tuningApply.applied.length >= 8);
