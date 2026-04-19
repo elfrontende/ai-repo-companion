@@ -61,6 +61,7 @@ function buildEconomics(status) {
       domain: item.domain,
       liveTokensUsed: item.liveTokensUsed,
       reductionGap: item.reductionGap,
+      evidenceScore: item.evidenceScore,
       riskLevel: item.riskLevel,
       expectedSavingsHint: item.expectedSavingsHint,
       whyRanked: item.whyRanked
@@ -70,6 +71,7 @@ function buildEconomics(status) {
       action: item.action,
       currentThreshold: item.currentThreshold,
       suggestedThreshold: item.suggestedThreshold,
+      evidenceScore: item.evidenceScore,
       riskLevel: item.riskLevel,
       expectedSavingsHint: item.expectedSavingsHint,
       whyRanked: item.whyRanked
@@ -172,6 +174,7 @@ function compactAction(action) {
     action: action.action,
     reason: action.reason,
     whyNow: action.whyNow,
+    evidenceScore: action.evidenceScore,
     riskLevel: action.riskLevel,
     expectedOutcome: action.expectedOutcome
   };
