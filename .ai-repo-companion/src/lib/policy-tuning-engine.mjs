@@ -33,6 +33,7 @@ export async function analyzePolicyTuning(rootDir, options = {}) {
       expectedImpactSummary: summarizeSuggestionImpact(suggestion)
     })),
     tuningPlan,
+    workflow: buildTuningWorkflow(tuningPlan, selectedPhase),
     summary: {
       benchmarkLoaded: Boolean(benchmark?.aggregate),
       selectedPhase,
@@ -854,6 +855,37 @@ function inferPlanPhaseRisk(phase) {
     return "medium";
   }
   return "medium";
+}
+
+function buildTuningWorkflow(tuningPlan, selectedPhase) {
+  const phases = tuningPlan.steps.map((step) => ({
+    phase: step.phase,
+    title: step.title,
+    riskLevel: step.riskLevel,
+    expectedImpactSummary: step.expectedImpactSummary,
+    whyThisPhase: step.whyThisPhase,
+    commands: {
+      preview: `node src/cli.mjs tune --phase ${step.phase}`,
+      apply: `node src/cli.mjs tune --apply --phase ${step.phase}`,
+      auto: `node src/cli.mjs tune --auto --phase ${step.phase}`,
+      benchmark: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
+      reconcile: `node src/cli.mjs tune --reconcile --phase ${step.phase}`
+    },
+    recommendedLoop: [
+      `Preview ${step.phase} suggestions`,
+      `Apply only the ${step.phase} phase`,
+      "Run a short benchmark cycle",
+      `Reconcile or roll back ${step.phase} if the canary regresses`
+    ]
+  }));
+
+  return {
+    selectedPhase,
+    recommendation: selectedPhase
+      ? `Work only the ${selectedPhase} phase, then re-benchmark before moving to the next phase.`
+      : "Work phases in order: preview, apply one phase, benchmark, then reconcile before widening the blast radius.",
+    phases
+  };
 }
 
 function applyConfigPatch(config, pathSegments, value) {
