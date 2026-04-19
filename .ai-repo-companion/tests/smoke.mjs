@@ -1308,6 +1308,14 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
     }
   },
   trend: {
+    confidence: {
+      score: 88,
+      level: "high",
+      reasons: [
+        "trend window is fully populated",
+        "cheapest variant stayed stable for at least three runs"
+      ]
+    },
     byDomain: {
       docs: {
         cheapestVariantStreak: {
@@ -1347,6 +1355,14 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark.json"), {
     available: true,
     outcome: "improved",
     balancedReductionPercentDelta: 6.75,
+    confidence: {
+      score: 80,
+      level: "high",
+      reasons: [
+        "all monitored cheap domains are covered",
+        "monitored domains improve without visible regressions"
+      ]
+    },
     summary: "Post-tune benchmark improved, led by docs."
   }
 });
@@ -1407,6 +1423,14 @@ await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark-cycle.jso
       direction: "improving",
       recommendation: "The last 2 cycle runs are improving by 3.00 balanced points versus the previous window."
     },
+    confidence: {
+      score: 90,
+      level: "high",
+      reasons: [
+        "multiple benchmark cycles are available",
+        "window-to-window comparison is available"
+      ]
+    },
     recommendation: "Recent benchmark cycles are consistently improving, with an average balanced delta of 3.25 points."
   }
 });
@@ -1425,7 +1449,9 @@ assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].liveTokensUsed,
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics[0].saverTrendStreak, 3);
 assert.equal(runtimeStatus.benchmarkSummary.domainDiagnostics.find((item) => item.domain === "ui").isNoisy, true);
 assert.equal(runtimeStatus.benchmarkSummary.domainTrend.docs.cheapestVariantStreak.count, 3);
+assert.equal(runtimeStatus.benchmarkSummary.confidence.level, "high");
 assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.outcome, "improved");
+assert.equal(runtimeStatus.benchmarkSummary.tuningComparison.confidence.level, "high");
 assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].domain, "docs");
 assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].riskLevel, "low");
 assert.match(runtimeStatus.benchmarkSummary.topWasteDomains[0].expectedSavingsHint, /recover roughly/i);
@@ -1439,6 +1465,7 @@ assert.equal(runtimeStatus.benchmarkCycleSummary.trendDirection, "improving");
 assert.equal(runtimeStatus.benchmarkCycleSummary.latestOutcomeStreak, 2);
 assert.equal(runtimeStatus.benchmarkCycleSummary.windowComparison.available, true);
 assert.equal(runtimeStatus.benchmarkCycleSummary.windowComparison.direction, "improving");
+assert.equal(runtimeStatus.benchmarkCycleSummary.confidence.level, "high");
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
@@ -1448,6 +1475,7 @@ assert.ok(typeof runtimeStatus.nextActions[0].expectedOutcome === "string");
 assert.match(runtimeStatus.compactSummary.whyExpensive, /docs|unknown-domain|No live token burn/i);
 assert.match(runtimeStatus.compactSummary.whyTuneNow, /cheap-domain waste signal|Recent benchmark cycles|No strong tuning signal/i);
 assert.match(runtimeStatus.compactSummary.whyQueueBlocked, /queued job|not currently blocked/i);
+assert.match(runtimeStatus.compactSummary.whyConfident, /confidence is high/i);
 assert.match(runtimeStatus.costSummary.recommendation, /no strong cost signal/i);
 
 const runtimeDoctor = await runRuntimeDoctor(statusRoot, statusConfig);
@@ -1577,6 +1605,7 @@ assert.ok(benchmarkReport.aggregate.byDomain.deploy.byVariant.saver.totalTokens 
 assert.equal(benchmarkReport.trend.historyEntries, 3);
 assert.equal(benchmarkReport.trend.cheapestVariantStreak.variant, "saver");
 assert.equal(benchmarkReport.trend.cheapestVariantStreak.count, 3);
+assert.ok(["low", "medium", "high"].includes(benchmarkReport.trend.confidence.level));
 assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.variant, "saver");
 assert.equal(benchmarkReport.trend.byDomain.docs.cheapestVariantStreak.count, 3);
 assert.ok(typeof benchmarkReport.trend.byDomain.deploy.deltaByVariant.saver.totalTokensDelta === "number");
@@ -1584,6 +1613,7 @@ assert.equal(typeof benchmarkReport.trend.byDomain.ui.isNoisy, "boolean");
 assert.match(benchmarkReport.trend.recommendation, /Saver has been the cheapest variant/i);
 assert.equal(benchmarkReport.tuningComparison.available, true);
 assert.equal(benchmarkReport.tuningComparison.outcome, "improved");
+assert.ok(["low", "medium", "high"].includes(benchmarkReport.tuningComparison.confidence.level));
 assert.ok(benchmarkReport.tuningComparison.balancedReductionPercentDelta > 0);
 assert.equal(benchmarkReport.tuningComparison.byDomain.docs.outcome, "improved");
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
@@ -1639,6 +1669,7 @@ assert.equal(benchmarkCycle.multiCycle.available, true);
 assert.ok(["improving", "degrading", "mixed"].includes(benchmarkCycle.multiCycle.trendDirection));
 assert.equal(benchmarkCycle.multiCycle.windowComparison.available, true);
 assert.ok(["improving", "degrading", "flat"].includes(benchmarkCycle.multiCycle.windowComparison.direction));
+assert.ok(["low", "medium", "high"].includes(benchmarkCycle.multiCycle.confidence.level));
 const storedCycleReport = await readJson(path.join(benchmarkCycleRoot, "state/benchmarks/last-benchmark-cycle-low-risk.json"), null);
 assert.equal(storedCycleReport.suite, "low-risk");
 assert.equal(storedCycleReport.multiCycle.available, true);
