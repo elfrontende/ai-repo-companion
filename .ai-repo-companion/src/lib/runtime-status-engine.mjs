@@ -13,6 +13,7 @@ export async function getRuntimeStatus(rootDir, config = {}) {
   const queue = await inspectReviewQueue(rootDir);
   const metrics = await summarizeReviewMetrics(rootDir);
   const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
+  const benchmarkCycleSummary = await readBenchmarkCycleSummary(rootDir, config);
   const tuningSummary = await readTuningSummary(rootDir, config);
   const costSummary = buildCostSummary(queue, metrics);
   return {
@@ -21,8 +22,9 @@ export async function getRuntimeStatus(rootDir, config = {}) {
     metrics,
     costSummary,
     benchmarkSummary,
+    benchmarkCycleSummary,
     tuningSummary,
-    nextActions: buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSummary),
+    nextActions: buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary),
     recovery: await readJson(path.join(rootDir, "state/reviews/recovery-state.json"), null)
   };
 }
@@ -34,6 +36,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
   const lock = await readJson(path.join(rootDir, "state/reviews/worker-lock.json"), null);
   const metrics = await summarizeReviewMetrics(rootDir);
   const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
+  const benchmarkCycleSummary = await readBenchmarkCycleSummary(rootDir, config);
   const tuningSummary = await readTuningSummary(rootDir, config);
   const findings = [];
 
@@ -102,6 +105,20 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  if (!benchmarkCycleSummary.loaded) {
+    findings.push({
+      severity: "info",
+      code: "benchmark-cycle-missing",
+      message: "No benchmark cycle exists yet. Run a short multi-iteration benchmark loop before trusting longer-run tuning behavior."
+    });
+  } else if (benchmarkCycleSummary.isStale) {
+    findings.push({
+      severity: "info",
+      code: "benchmark-cycle-stale",
+      message: "The last benchmark cycle is stale. Refresh a multi-iteration cycle before making long-run tuning decisions."
+    });
+  }
+
   if (benchmarkSummary.cheapestVariant === "saver"
     && (config.reviewExecution?.reviewProfiles?.balanced?.codexReasoningEffort ?? "medium") !== "low") {
     findings.push({
@@ -167,12 +184,29 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
+  if (benchmarkCycleSummary.loaded && benchmarkCycleSummary.trendDirection === "degrading") {
+    findings.push({
+      severity: "warning",
+      code: "benchmark-cycle-degrading",
+      message: benchmarkCycleSummary.recommendation
+    });
+  }
+
+  if (benchmarkCycleSummary.loaded && benchmarkCycleSummary.trendDirection === "improving") {
+    findings.push({
+      severity: "info",
+      code: "benchmark-cycle-improving",
+      message: benchmarkCycleSummary.recommendation
+    });
+  }
+
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     queue,
     worker,
     metrics,
     benchmarkSummary,
+    benchmarkCycleSummary,
     tuningSummary,
     recommendedActions: buildDoctorRecommendedActions(findings),
     recovery,
@@ -238,6 +272,37 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
     safeSavingsOpportunities,
     domainTrend: benchmark?.trend?.byDomain ?? {},
     tuningComparison: benchmark?.tuningComparison ?? null
+  };
+}
+
+async function readBenchmarkCycleSummary(rootDir, config = {}) {
+  const benchmarkCycle = await readJson(path.join(rootDir, "state/benchmarks/last-benchmark-cycle.json"), null);
+  const generatedAt = benchmarkCycle?.generatedAt ?? null;
+  const freshnessMinutes = config.tuning?.benchmarkCycleFreshnessMinutes ?? config.tuning?.benchmarkFreshnessMinutes ?? 1440;
+  const ageMinutes = ageInMinutes(generatedAt);
+  const multiCycle = benchmarkCycle?.multiCycle ?? { available: false, reason: "no-cycle-summary" };
+
+  return {
+    loaded: Boolean(benchmarkCycle?.summary),
+    generatedAt,
+    ageMinutes,
+    isStale: ageMinutes > freshnessMinutes,
+    suite: benchmarkCycle?.suite ?? "mixed",
+    iterations: benchmarkCycle?.iterations ?? 0,
+    autoTuneBetweenRuns: benchmarkCycle?.autoTuneBetweenRuns === true,
+    latestOutcome: multiCycle.latestOutcome ?? benchmarkCycle?.summary?.outcome ?? null,
+    trendDirection: multiCycle.trendDirection ?? (benchmarkCycle?.summary?.outcome === "improved"
+      ? "improving"
+      : benchmarkCycle?.summary?.outcome === "degraded"
+        ? "degrading"
+        : "mixed"),
+    latestOutcomeStreak: multiCycle.latestOutcomeStreak ?? 0,
+    averageBalancedDelta: multiCycle.averageBalancedDelta ?? null,
+    averageRollbackCount: multiCycle.averageRollbackCount ?? null,
+    latestVsPreviousBalancedDelta: multiCycle.latestVsPreviousBalancedDelta ?? null,
+    outcomeCounts: multiCycle.outcomeCounts ?? {},
+    recommendation: multiCycle.recommendation ?? benchmarkCycle?.summary?.recommendation ?? null,
+    multiCycle
   };
 }
 
@@ -375,7 +440,7 @@ function buildSafeSavingsOpportunities(domainDiagnostics) {
     }));
 }
 
-function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSummary) {
+function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmarkCycleSummary, tuningSummary) {
   const actions = [];
 
   if (!benchmarkSummary.loaded) {
@@ -391,6 +456,29 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, tuningSum
       action: "node src/cli.mjs benchmark",
       reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading.",
       whyNow: "Fresh benchmark evidence has higher priority than further tuning on stale numbers."
+    });
+  }
+
+  if (!benchmarkCycleSummary.loaded && benchmarkSummary.loaded) {
+    actions.push({
+      priority: 94,
+      action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
+      reason: "No benchmark cycle exists yet, so longer-run tuning behavior is still unvalidated.",
+      whyNow: "A short benchmark cycle is the fastest way to verify that recent tuning wins are not one-run noise."
+    });
+  } else if (benchmarkCycleSummary.isStale) {
+    actions.push({
+      priority: 89,
+      action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
+      reason: "The last benchmark cycle is stale, so long-run tuning guidance may have drifted.",
+      whyNow: "Cycle-level evidence is more important than another manual tune when the existing long-run signal is old."
+    });
+  } else if (benchmarkCycleSummary.trendDirection === "degrading") {
+    actions.push({
+      priority: 88,
+      action: "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
+      reason: benchmarkCycleSummary.recommendation,
+      whyNow: "The last few benchmark cycles already point to degrading economics, so the next step is to reproduce that trend before widening tuning changes."
     });
   }
 
@@ -464,10 +552,10 @@ function buildDoctorRecommendedActions(findings) {
   };
 
   push(
-    findings.some((item) => item.code === "benchmark-missing" || item.code === "benchmark-stale"),
+    findings.some((item) => ["benchmark-missing", "benchmark-stale", "benchmark-cycle-missing", "benchmark-cycle-stale", "benchmark-cycle-degrading"].includes(item.code)),
     100,
-    "node src/cli.mjs benchmark",
-    "Refresh synthetic cost evidence before trusting runtime recommendations."
+    "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
+    "Refresh synthetic benchmark evidence before trusting longer-run runtime recommendations."
   );
   push(
     findings.some((item) => item.code === "post-tune-benchmark-degraded" || item.code === "canary-pending-reconcile"),

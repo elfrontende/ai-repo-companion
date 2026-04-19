@@ -202,6 +202,7 @@ Daily ergonomics are better now too:
 - `node src/cli.mjs status` gives one compact snapshot of queue, worker, metrics, and recovery state
 - `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
 - `status` now also surfaces the latest benchmark summary and last auto-tune snapshot
+- `status` now also surfaces the latest benchmark-cycle summary, so long-run synthetic tuning drift is visible alongside the last single benchmark
 - `status` also includes domain diagnostics for low-risk domains, so you can see which domain is burning tokens and which one still has value-gate drift
 - `status` now also returns `nextActions`, a short prioritized list of the most useful local commands to run next
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
@@ -227,6 +228,7 @@ Synthetic validation is built in too:
 - the trend block now also persists per-domain cheapest-variant streaks, so tuning can distinguish a stable `docs` cost problem from one noisy benchmark run
 - each benchmark report now also stores a `tuningComparison` block when a previous tune baseline exists, so the operator can see whether the latest benchmark actually improved or degraded after tuning
 - benchmark cycles also return a compact summary for first-vs-last economics, accepted canaries, and rollback counts across the loop
+- benchmark cycles now also persist their own report/history files and produce a short `multiCycle` summary, so several recent cycle runs can be compared instead of treating each loop as an isolated snapshot
 
 This gives a repeatable local proxy for both policy quality and operator-facing cost controls before you trust the system on real repository work.
 

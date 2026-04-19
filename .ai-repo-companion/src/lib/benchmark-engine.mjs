@@ -206,13 +206,47 @@ export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
     });
   }
 
-  return {
+  const config = await readJson(path.join(rootDir, "config/system.json"), {});
+  const cycleReport = {
+    generatedAt: new Date().toISOString(),
     iterations,
     suite,
     autoTuneBetweenRuns,
     benchmarks: benchmarkRuns,
     tuningRuns,
     summary: buildBenchmarkCycleSummary(benchmarkRuns, tuningRuns)
+  };
+  const cycleReportPath = getBenchmarkCycleReportPath(rootDir, suite);
+  const cycleHistoryPath = getBenchmarkCycleHistoryPath(rootDir, suite);
+  const cycleHistoryRetentionEntries = Number(config.tuning?.benchmarkCycleHistoryRetentionEntries)
+    || Number(config.tuning?.benchmarkHistoryRetentionEntries)
+    || 20;
+  const cycleTrendWindow = Number(config.tuning?.benchmarkCycleTrendWindow)
+    || Number(config.tuning?.benchmarkTrendWindow)
+    || 5;
+  await writeJson(cycleReportPath, cycleReport);
+  await appendLine(cycleHistoryPath, JSON.stringify({
+    generatedAt: cycleReport.generatedAt,
+    suite,
+    summary: cycleReport.summary
+  }));
+  await trimBenchmarkHistory(cycleHistoryPath, cycleHistoryRetentionEntries);
+  cycleReport.multiCycle = await buildBenchmarkCycleComparison(cycleHistoryPath, cycleTrendWindow);
+  await writeJson(cycleReportPath, cycleReport);
+  if (suite === "mixed") {
+    await writeJson(path.join(rootDir, "state/benchmarks/last-benchmark-cycle.json"), cycleReport);
+  }
+
+  return {
+    reportPath: cycleReportPath,
+    report: cycleReport,
+    iterations,
+    suite,
+    autoTuneBetweenRuns,
+    benchmarks: benchmarkRuns,
+    tuningRuns,
+    summary: cycleReport.summary,
+    multiCycle: cycleReport.multiCycle
   };
 }
 
@@ -232,6 +266,18 @@ function getBenchmarkHistoryPath(rootDir, suite) {
   return suite === "mixed"
     ? path.join(rootDir, "state/benchmarks/history.jsonl")
     : path.join(rootDir, `state/benchmarks/history-${suite}.jsonl`);
+}
+
+function getBenchmarkCycleReportPath(rootDir, suite) {
+  return suite === "mixed"
+    ? path.join(rootDir, "state/benchmarks/last-benchmark-cycle.json")
+    : path.join(rootDir, `state/benchmarks/last-benchmark-cycle-${suite}.json`);
+}
+
+function getBenchmarkCycleHistoryPath(rootDir, suite) {
+  return suite === "mixed"
+    ? path.join(rootDir, "state/benchmarks/history-cycle.jsonl")
+    : path.join(rootDir, `state/benchmarks/history-cycle-${suite}.jsonl`);
 }
 
 async function buildVariantBenchmark(rootDir, config, notes, sample, variant) {
@@ -651,6 +697,123 @@ function buildBenchmarkCycleRecommendation(outcome, balancedDelta, tuningRunCoun
     return `The benchmark cycle regressed by ${Math.abs(balancedDelta).toFixed(2)} balanced reduction points. Reconcile or tighten the auto-tune lane before trusting more changes.`;
   }
   return "The benchmark cycle stayed effectively flat. Collect more iterations before changing policy based on cycle data alone.";
+}
+
+async function buildBenchmarkCycleComparison(historyPath, trendWindow) {
+  const entries = await readHistoryEntries(historyPath);
+  const recentEntries = entries.slice(-Math.max(2, trendWindow));
+  const summaries = recentEntries
+    .map((entry) => ({
+      generatedAt: entry.generatedAt ?? null,
+      ...entry.summary
+    }))
+    .filter((entry) => typeof entry.outcome === "string");
+
+  if (summaries.length === 0) {
+    return {
+      available: false,
+      reason: "no-cycle-history"
+    };
+  }
+
+  const latest = summaries.at(-1);
+  const previous = summaries.at(-2) ?? null;
+  const outcomeCounts = summaries.reduce((counts, entry) => {
+    counts[entry.outcome] = (counts[entry.outcome] ?? 0) + 1;
+    return counts;
+  }, {});
+  const averageBalancedDelta = Number((
+    summaries.reduce((total, entry) => total + (Number(entry.balancedReductionPercentDelta) || 0), 0)
+    / summaries.length
+  ).toFixed(2));
+  const averageRollbackCount = Number((
+    summaries.reduce((total, entry) => total + (Number(entry.rollbackCount) || 0), 0)
+    / summaries.length
+  ).toFixed(2));
+  const latestOutcomeStreak = countCycleOutcomeStreak(summaries, latest.outcome);
+  const latestVsPreviousBalancedDelta = previous
+    ? toFixedDelta(
+      Number(latest.balancedReductionPercentDelta),
+      Number(previous.balancedReductionPercentDelta)
+    )
+    : null;
+  const trendDirection = resolveCycleTrendDirection({
+    averageBalancedDelta,
+    latestOutcome: latest.outcome,
+    improvedCount: outcomeCounts.improved ?? 0,
+    degradedCount: outcomeCounts.degraded ?? 0
+  });
+
+  return {
+    available: true,
+    recentCycleCount: summaries.length,
+    latestGeneratedAt: latest.generatedAt ?? null,
+    latestOutcome: latest.outcome,
+    previousOutcome: previous?.outcome ?? null,
+    latestOutcomeStreak,
+    averageBalancedDelta,
+    averageRollbackCount,
+    latestVsPreviousBalancedDelta,
+    outcomeCounts,
+    trendDirection,
+    recommendation: buildCycleTrendRecommendation({
+      trendDirection,
+      latestOutcome: latest.outcome,
+      latestOutcomeStreak,
+      averageBalancedDelta,
+      latestVsPreviousBalancedDelta
+    })
+  };
+}
+
+function countCycleOutcomeStreak(summaries, outcome) {
+  let count = 0;
+  for (let index = summaries.length - 1; index >= 0; index -= 1) {
+    if (summaries[index].outcome !== outcome) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+function resolveCycleTrendDirection({ averageBalancedDelta, latestOutcome, improvedCount, degradedCount }) {
+  if (Number.isFinite(averageBalancedDelta) && averageBalancedDelta >= 1 && improvedCount >= degradedCount) {
+    return "improving";
+  }
+  if (Number.isFinite(averageBalancedDelta) && averageBalancedDelta <= -1 && degradedCount >= improvedCount) {
+    return "degrading";
+  }
+  if (latestOutcome === "improved") {
+    return "improving";
+  }
+  if (latestOutcome === "degraded") {
+    return "degrading";
+  }
+  return "mixed";
+}
+
+function buildCycleTrendRecommendation({
+  trendDirection,
+  latestOutcome,
+  latestOutcomeStreak,
+  averageBalancedDelta,
+  latestVsPreviousBalancedDelta
+}) {
+  if (trendDirection === "improving") {
+    return latestOutcomeStreak >= 2
+      ? `Recent benchmark cycles are consistently improving, with an average balanced delta of ${averageBalancedDelta.toFixed(2)} points.`
+      : `The latest benchmark cycle improved, and the recent average balanced delta is ${averageBalancedDelta.toFixed(2)} points.`;
+  }
+  if (trendDirection === "degrading") {
+    return Number.isFinite(latestVsPreviousBalancedDelta)
+      ? `Recent benchmark cycles are degrading, and the latest cycle moved ${Math.abs(latestVsPreviousBalancedDelta).toFixed(2)} points in the wrong direction versus the previous cycle.`
+      : "Recent benchmark cycles are degrading. Reconcile recent tuning changes before trusting more automation.";
+  }
+  if (latestOutcome === "flat") {
+    return "Recent benchmark cycles are mostly flat. Collect more cycles before widening the tuning blast radius.";
+  }
+  return "Recent benchmark cycles are mixed. Treat the signal as directional, not yet conclusive.";
 }
 
 function buildTuningComparison(report, lastTuning, monitoredDomains) {

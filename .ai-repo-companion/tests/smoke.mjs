@@ -1266,6 +1266,31 @@ await writeJson(path.join(statusRoot, "state/tuning/last-tuning.json"), {
   ],
   blocked: []
 });
+await writeJson(path.join(statusRoot, "state/benchmarks/last-benchmark-cycle.json"), {
+  generatedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+  suite: "mixed",
+  iterations: 3,
+  autoTuneBetweenRuns: true,
+  summary: {
+    outcome: "improved",
+    recommendation: "The benchmark cycle improved by 4.50 balanced reduction points after 2 tuning checkpoints."
+  },
+  multiCycle: {
+    available: true,
+    latestOutcome: "improved",
+    previousOutcome: "flat",
+    latestOutcomeStreak: 2,
+    averageBalancedDelta: 3.25,
+    averageRollbackCount: 0,
+    latestVsPreviousBalancedDelta: 2.5,
+    outcomeCounts: {
+      improved: 2,
+      flat: 1
+    },
+    trendDirection: "improving",
+    recommendation: "Recent benchmark cycles are consistently improving, with an average balanced delta of 3.25 points."
+  }
+});
 
 const statusConfig = await readJson(path.join(statusRoot, "config/system.json"), {});
 const runtimeStatus = await getRuntimeStatus(statusRoot, statusConfig);
@@ -1286,6 +1311,9 @@ assert.equal(runtimeStatus.benchmarkSummary.topWasteDomains[0].domain, "docs");
 assert.match(runtimeStatus.benchmarkSummary.topWasteDomains[0].whyRanked, /docs is consuming/i);
 assert.equal(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].domain, "docs");
 assert.match(runtimeStatus.benchmarkSummary.safeSavingsOpportunities[0].whyRanked, /stable saver streak/i);
+assert.equal(runtimeStatus.benchmarkCycleSummary.loaded, true);
+assert.equal(runtimeStatus.benchmarkCycleSummary.trendDirection, "improving");
+assert.equal(runtimeStatus.benchmarkCycleSummary.latestOutcomeStreak, 2);
 assert.equal(runtimeStatus.tuningSummary.loaded, true);
 assert.equal(runtimeStatus.tuningSummary.mode, "auto");
 assert.equal(runtimeStatus.nextActions[0].action, "node src/cli.mjs tune --auto");
@@ -1299,6 +1327,7 @@ assert.ok(runtimeDoctor.findings.some((item) => item.code === "auto-tune-stale")
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-value-gate-drift-docs"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "post-tune-benchmark-improved"));
 assert.ok(runtimeDoctor.findings.some((item) => item.code === "domain-signal-noisy-ui"));
+assert.ok(runtimeDoctor.findings.some((item) => item.code === "benchmark-cycle-improving"));
 assert.equal(runtimeDoctor.recommendedActions[0].action, "node src/cli.mjs tune --auto");
 assert.ok(typeof runtimeDoctor.recommendedActions[0].whyNow === "string");
 
@@ -1460,6 +1489,13 @@ assert.equal(benchmarkCycle.tuningRuns.length, 2);
 assert.ok(["improved", "flat", "degraded"].includes(benchmarkCycle.summary.outcome));
 assert.ok(typeof benchmarkCycle.summary.recommendation === "string");
 assert.ok(Number.isFinite(benchmarkCycle.summary.tuningRunCount));
+assert.equal(benchmarkCycle.multiCycle.available, true);
+assert.ok(["improving", "degrading", "mixed"].includes(benchmarkCycle.multiCycle.trendDirection));
+const storedCycleReport = await readJson(path.join(benchmarkCycleRoot, "state/benchmarks/last-benchmark-cycle-low-risk.json"), null);
+assert.equal(storedCycleReport.suite, "low-risk");
+assert.equal(storedCycleReport.multiCycle.available, true);
+const storedCycleHistory = await fs.readFile(path.join(benchmarkCycleRoot, "state/benchmarks/history-cycle-low-risk.jsonl"), "utf8");
+assert.equal(storedCycleHistory.trim().split("\n").length, 1);
 
 const staleQueuePath = path.join(tempRoot, "state/memory/review-queue.json");
 const stalePolicyStatePath = path.join(tempRoot, "state/memory/policy-state.json");
