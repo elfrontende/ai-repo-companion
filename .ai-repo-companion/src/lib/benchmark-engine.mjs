@@ -106,7 +106,9 @@ export async function runSyntheticBenchmark(rootDir, config, options = {}) {
   // profiles plus a naive baseline that drags in the full note set.
   const suite = resolveBenchmarkSuite(options.suite);
   const suiteTasks = benchmarkSuites[suite];
-  const notes = augmentWithNoiseNotes(await loadNotes(rootDir));
+  const corpusMode = resolveBenchmarkCorpusMode(options.corpus ?? options.corpusMode);
+  const rawNotes = await loadNotes(rootDir);
+  const notes = corpusMode === "synthetic-noise" ? augmentWithNoiseNotes(rawNotes) : rawNotes;
   const allNoteTokens = notes.reduce((total, note) => total + note.tokenEstimate, 0);
   const allNoteCount = notes.length;
   const taskResults = [];
@@ -143,9 +145,18 @@ export async function runSyntheticBenchmark(rootDir, config, options = {}) {
   const report = {
     generatedAt: new Date().toISOString(),
     suite,
+    corpusMode,
+    inputCorpus: {
+      noteCount: allNoteCount,
+      totalTokens: allNoteTokens,
+      noiseNotesAdded: Math.max(0, notes.length - rawNotes.length),
+      realNoteCount: rawNotes.length,
+      realTotalTokens: rawNotes.reduce((total, note) => total + note.tokenEstimate, 0)
+    },
     variants: benchmarkVariants,
     tasks: taskResults,
-    aggregate
+    aggregate,
+    realCorpusCheck: await buildRealCorpusCheck(rootDir, config, rawNotes, suiteTasks)
   };
   const reportPath = getBenchmarkReportPath(rootDir, suite);
   const historyPath = getBenchmarkHistoryPath(rootDir, suite);
@@ -155,6 +166,7 @@ export async function runSyntheticBenchmark(rootDir, config, options = {}) {
   await appendLine(historyPath, JSON.stringify({
     generatedAt: report.generatedAt,
     suite,
+    corpusMode,
     aggregate
   }));
   await trimBenchmarkHistory(historyPath, historyRetentionEntries);
@@ -187,15 +199,17 @@ export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
   const iterations = Math.max(1, Number(options.iterations) || 3);
   const autoTuneBetweenRuns = options.autoTuneBetweenRuns === true;
   const suite = resolveBenchmarkSuite(options.suite);
+  const corpusMode = resolveBenchmarkCorpusMode(options.corpus ?? options.corpusMode);
   const benchmarkRuns = [];
   const tuningRuns = [];
 
   for (let index = 0; index < iterations; index += 1) {
     const config = await readJson(path.join(rootDir, "config/system.json"), {});
-    const benchmark = await runSyntheticBenchmark(rootDir, config, { suite });
+    const benchmark = await runSyntheticBenchmark(rootDir, config, { suite, corpusMode });
     benchmarkRuns.push({
       iteration: index + 1,
       suite,
+      corpusMode,
       generatedAt: benchmark.report.generatedAt,
       cheapestVariant: benchmark.report.aggregate.cheapestVariant,
       balancedReductionPercent: benchmark.report.aggregate.byVariant?.balanced?.reductionPercent ?? null,
@@ -223,6 +237,7 @@ export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
     generatedAt: new Date().toISOString(),
     iterations,
     suite,
+    corpusMode,
     autoTuneBetweenRuns,
     benchmarks: benchmarkRuns,
     tuningRuns,
@@ -258,6 +273,7 @@ export async function runSyntheticBenchmarkCycle(rootDir, options = {}) {
     report: cycleReport,
     iterations,
     suite,
+    corpusMode,
     autoTuneBetweenRuns,
     benchmarks: benchmarkRuns,
     tuningRuns,
@@ -270,6 +286,12 @@ function resolveBenchmarkSuite(requestedSuite) {
   return Object.prototype.hasOwnProperty.call(benchmarkSuites, requestedSuite ?? "")
     ? requestedSuite
     : "mixed";
+}
+
+function resolveBenchmarkCorpusMode(requestedMode) {
+  return requestedMode === "synthetic" || requestedMode === "synthetic-noise"
+    ? "synthetic-noise"
+    : "real";
 }
 
 function getBenchmarkReportPath(rootDir, suite) {
@@ -396,6 +418,77 @@ function augmentWithNoiseNotes(notes) {
   }));
 
   return [...notes, ...noiseNotes];
+}
+
+async function buildRealCorpusCheck(rootDir, config, notes, suiteTasks) {
+  const realNoteTokens = notes.reduce((total, note) => total + note.tokenEstimate, 0);
+  const realNoteCount = notes.length;
+  const tasks = [];
+
+  for (const sample of suiteTasks) {
+    const taskProfile = classifyTask(sample.task);
+    const decision = await evaluateMemoryPolicy(rootDir, taskProfile, config);
+    const context = assembleContext(sample.task, notes, {
+      tokenBudget: config.retrieval?.defaultTokenBudget ?? 1200,
+      maxNotes: config.retrieval?.maxNotesPerBundle ?? 6
+    });
+    const reviewProfile = decision.shouldQueueReview
+      ? resolveBenchmarkReviewProfile(decision.mode, config.reviewExecution)
+      : null;
+    const boundedReviewTokens = decision.shouldQueueReview
+      ? estimateLiveReviewTokens(context.usedTokens, reviewProfile, decision.mode)
+      : 0;
+    const fullContextReviewTokens = decision.shouldQueueReview
+      ? estimateLiveReviewTokens(realNoteTokens, reviewProfile, decision.mode)
+      : 0;
+    const boundedTotalTokens = context.usedTokens + boundedReviewTokens;
+    const fullContextTotalTokens = realNoteTokens + fullContextReviewTokens;
+
+    tasks.push({
+      id: sample.id,
+      domain: sample.domain,
+      task: sample.task,
+      selectedNotes: context.selectedNotes.length,
+      fullNoteCount: realNoteCount,
+      contextTokens: context.usedTokens,
+      fullContextTokens: realNoteTokens,
+      reviewQueued: decision.shouldQueueReview,
+      mode: decision.mode,
+      boundedTotalTokens,
+      fullContextTotalTokens,
+      tokensSaved: fullContextTotalTokens - boundedTotalTokens,
+      reductionPercent: fullContextTotalTokens > 0
+        ? Number((((fullContextTotalTokens - boundedTotalTokens) / fullContextTotalTokens) * 100).toFixed(2))
+        : 0,
+      emptyContext: context.selectedNotes.length === 0,
+      usedFullCorpus: context.selectedNotes.length === realNoteCount && context.usedTokens === realNoteTokens
+    });
+  }
+
+  const totalBoundedTokens = tasks.reduce((total, task) => total + task.boundedTotalTokens, 0);
+  const totalFullContextTokens = tasks.reduce((total, task) => total + task.fullContextTotalTokens, 0);
+
+  return {
+    noteCount: realNoteCount,
+    totalTokens: realNoteTokens,
+    taskCount: tasks.length,
+    averageSelectedNotes: tasks.length > 0
+      ? Number((tasks.reduce((total, task) => total + task.selectedNotes, 0) / tasks.length).toFixed(2))
+      : 0,
+    averageContextTokens: tasks.length > 0
+      ? Number((tasks.reduce((total, task) => total + task.contextTokens, 0) / tasks.length).toFixed(2))
+      : 0,
+    averageReductionPercent: tasks.length > 0
+      ? Number((tasks.reduce((total, task) => total + task.reductionPercent, 0) / tasks.length).toFixed(2))
+      : 0,
+    emptyContextTasks: tasks.filter((task) => task.emptyContext).length,
+    fullCorpusTasks: tasks.filter((task) => task.usedFullCorpus).length,
+    totalTokensSaved: totalFullContextTokens - totalBoundedTokens,
+    reductionPercent: totalFullContextTokens > 0
+      ? Number((((totalFullContextTokens - totalBoundedTokens) / totalFullContextTokens) * 100).toFixed(2))
+      : 0,
+    tasks
+  };
 }
 
 function aggregateBenchmarkResults(taskResults) {

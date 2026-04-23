@@ -115,9 +115,13 @@ function buildEvidence(status, doctor, tuning) {
   const multiCycle = status.benchmarkCycleSummary.multiCycle ?? {};
   return {
     benchmark: {
+      corpusMode: status.benchmarkSummary.corpusMode,
       cheapestVariant: status.benchmarkSummary.cheapestVariant,
       balancedReductionPercent: status.benchmarkSummary.balancedReductionPercent,
       saverReductionPercent: status.benchmarkSummary.saverReductionPercent,
+      realCorpusReductionPercent: status.benchmarkSummary.realCorpusCheck?.reductionPercent ?? null,
+      emptyContextTasks: status.benchmarkSummary.realCorpusCheck?.emptyContextTasks ?? 0,
+      fullCorpusTasks: status.benchmarkSummary.realCorpusCheck?.fullCorpusTasks ?? 0,
       confidence: buildConfidenceCard(status.benchmarkSummary.confidence),
       tuningOutcome: status.benchmarkSummary.tuningComparison?.outcome ?? null,
       tuningSummary: status.benchmarkSummary.tuningComparison?.summary ?? null

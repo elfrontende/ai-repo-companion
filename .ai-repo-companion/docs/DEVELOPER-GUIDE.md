@@ -327,7 +327,7 @@ npm test
 
 ## Benchmarking strategy
 
-Synthetic benchmark is the main evidence loop.
+Benchmark is the main evidence loop.
 
 Run:
 
@@ -340,8 +340,11 @@ Useful variants:
 ```bash
 npm run benchmark -- --suite low-risk
 npm run benchmark -- --suite high-risk
+npm run benchmark -- --corpus synthetic-noise
 npm run benchmark -- --iterations 5 --autoTuneBetweenRuns
 ```
+
+The default benchmark uses the real note corpus. Use `--corpus synthetic-noise` only when you want to stress retrieval under artificial clutter and compare that against the real-corpus baseline.
 
 Use benchmark results to answer:
 
@@ -352,7 +355,7 @@ Use benchmark results to answer:
 
 ## How to read benchmark output
 
-The benchmark compares several runtime profiles against a naive baseline.
+The benchmark compares several runtime profiles against a naive baseline using the current note corpus by default.
 
 ### What `baseline` means
 

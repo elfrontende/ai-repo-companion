@@ -1894,17 +1894,21 @@ await writeJson(path.join(benchmarkRoot, "state/tuning/last-tuning.json"), {
 
 let benchmarkResult;
 for (let index = 0; index < 4; index += 1) {
-  benchmarkResult = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig);
+  benchmarkResult = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { corpusMode: "synthetic-noise" });
 }
 assert.equal(benchmarkResult.report.tasks.length, 5);
 assert.ok(benchmarkResult.report.aggregate.tokensSaved > 0);
 assert.ok(benchmarkResult.report.tasks.some((task) => task.savings.tokensSaved > 0));
+assert.equal(benchmarkResult.report.corpusMode, "synthetic-noise");
+assert.ok(benchmarkResult.report.inputCorpus.noiseNotesAdded > 0);
+assert.ok(benchmarkResult.report.realCorpusCheck.taskCount > 0);
 assert.equal(benchmarkResult.report.aggregate.cheapestVariant, "saver");
 assert.ok(benchmarkResult.report.aggregate.byVariant.saver.totalTokens <= benchmarkResult.report.aggregate.byVariant.strict.totalTokens);
 assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.saver));
 assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.strict));
 const benchmarkReport = await readJson(path.join(benchmarkRoot, "state/benchmarks/last-benchmark.json"), null);
 assert.equal(benchmarkReport.aggregate.taskCount, 5);
+assert.equal(benchmarkReport.corpusMode, "synthetic-noise");
 assert.ok(benchmarkReport.aggregate.byVariant.balanced.totalTokens > 0);
 assert.equal(benchmarkReport.aggregate.byDomain.docs.cheapestVariant, "saver");
 assert.ok(benchmarkReport.aggregate.byDomain.deploy.byVariant.saver.totalTokens > 0);
@@ -1925,14 +1929,21 @@ assert.equal(benchmarkReport.tuningComparison.byDomain.docs.outcome, "improved")
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
 assert.equal(benchmarkHistory.trim().split("\n").length, 3);
 
-const lowRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "low-risk" });
+const realCorpusBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { corpusMode: "real" });
+assert.equal(realCorpusBenchmark.report.corpusMode, "real");
+assert.equal(realCorpusBenchmark.report.inputCorpus.noiseNotesAdded, 0);
+assert.ok(realCorpusBenchmark.report.realCorpusCheck.noteCount > 0);
+assert.ok(realCorpusBenchmark.report.realCorpusCheck.taskCount > 0);
+assert.ok(realCorpusBenchmark.report.realCorpusCheck.emptyContextTasks >= 0);
+
+const lowRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "low-risk", corpusMode: "synthetic-noise" });
 assert.equal(lowRiskBenchmark.report.suite, "low-risk");
 assert.equal(lowRiskBenchmark.report.aggregate.taskCount, 4);
 assert.equal(lowRiskBenchmark.report.tuningComparison.available, false);
 const lowRiskHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history-low-risk.jsonl"), "utf8");
 assert.ok(lowRiskHistory.trim().split("\n").length >= 1);
 
-const highRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "high-risk" });
+const highRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "high-risk", corpusMode: "synthetic-noise" });
 assert.equal(highRiskBenchmark.report.suite, "high-risk");
 assert.equal(highRiskBenchmark.report.aggregate.taskCount, 3);
 assert.equal(highRiskBenchmark.report.tasks.every((task) => ["security", "migration", "architecture"].includes(task.domain)), true);
@@ -1963,9 +1974,11 @@ await fs.writeFile(
 const benchmarkCycle = await runSyntheticBenchmarkCycle(benchmarkCycleRoot, {
   iterations: 3,
   autoTuneBetweenRuns: true,
-  suite: "low-risk"
+  suite: "low-risk",
+  corpusMode: "synthetic-noise"
 });
 assert.equal(benchmarkCycle.suite, "low-risk");
+assert.equal(benchmarkCycle.corpusMode, "synthetic-noise");
 assert.equal(benchmarkCycle.benchmarks.length, 3);
 assert.equal(benchmarkCycle.tuningRuns.length, 2);
 assert.ok(["improved", "flat", "degraded"].includes(benchmarkCycle.summary.outcome));
@@ -1983,6 +1996,7 @@ assert.ok(["improving", "degrading", "flat"].includes(benchmarkCycle.multiCycle.
 assert.ok(["low", "medium", "high"].includes(benchmarkCycle.multiCycle.confidence.level));
 const storedCycleReport = await readJson(path.join(benchmarkCycleRoot, "state/benchmarks/last-benchmark-cycle-low-risk.json"), null);
 assert.equal(storedCycleReport.suite, "low-risk");
+assert.equal(storedCycleReport.corpusMode, "synthetic-noise");
 assert.equal(storedCycleReport.multiCycle.available, true);
 const storedCycleHistory = await fs.readFile(path.join(benchmarkCycleRoot, "state/benchmarks/history-cycle-low-risk.jsonl"), "utf8");
 assert.equal(storedCycleHistory.trim().split("\n").length, 4);
