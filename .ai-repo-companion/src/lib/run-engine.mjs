@@ -355,7 +355,8 @@ export async function recordRunHandoff(rootDir, runId, payload = {}) {
     reason: payload.reason ?? "",
     brief: payload.brief ?? "",
     artifactIds: payload.artifactIds ?? [],
-    consultation: Boolean(payload.consultation)
+    consultation: Boolean(payload.consultation),
+    status: payload.status ?? "created"
   };
   const recordPath = getRunEntityPath(rootDir, "handoffs", runId, handoff.id);
   await writeJson(recordPath, handoff);
@@ -371,6 +372,10 @@ export async function recordRunHandoff(rootDir, runId, payload = {}) {
     handoff,
     recordPath
   };
+}
+
+export async function updateRunHandoff(rootDir, runId, handoffId, patch = {}) {
+  return updateRunCollectionRecord(rootDir, "handoffs", runId, handoffId, patch, summarizeHandoff, "handoffs");
 }
 
 export async function recordRunVerdict(rootDir, runId, payload = {}) {
@@ -435,6 +440,10 @@ export async function recordRunRetryRequest(rootDir, runId, payload = {}) {
   };
 }
 
+export async function updateRunRetryRequest(rootDir, runId, retryRequestId, patch = {}) {
+  return updateRunCollectionRecord(rootDir, "retries", runId, retryRequestId, patch, summarizeRetryRequest, "retryRequests");
+}
+
 export async function readRunCollection(rootDir, runId, collection) {
   const files = (await listFiles(path.join(rootDir, "state/runs", collection), ".json"))
     .filter((filePath) => path.basename(filePath).startsWith(`${runId}--`));
@@ -446,6 +455,82 @@ export async function readRunCollection(rootDir, runId, collection) {
     }
   }
   return items;
+}
+
+export async function readTaskRunSurface(rootDir, runId = "latest") {
+  const run = runId === "latest"
+    ? await readLatestTaskRun(rootDir)
+    : await readTaskRun(rootDir, runId);
+  if (!run) {
+    return {
+      available: false,
+      reason: runId === "latest" ? "no-task-runs" : "task-run-missing"
+    };
+  }
+
+  const [agentRuns, artifacts, handoffs, verdicts, retries] = await Promise.all([
+    readRunCollection(rootDir, run.id, "agent-runs"),
+    readRunCollection(rootDir, run.id, "artifacts"),
+    readRunCollection(rootDir, run.id, "handoffs"),
+    readRunCollection(rootDir, run.id, "verdicts"),
+    readRunCollection(rootDir, run.id, "retries")
+  ]);
+
+  return {
+    available: true,
+    run: {
+      id: run.id,
+      status: run.status,
+      currentStage: run.currentStage,
+      task: run.task,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      completedAt: run.completedAt ?? null,
+      failedAt: run.failedAt ?? null,
+      reviewStatus: run.review?.status ?? null,
+      multiAgentStatus: run.multiAgent?.status ?? "not-started",
+      rolloutMode: run.multiAgent?.rolloutMode ?? null,
+      currentPhase: run.multiAgent?.currentPhase ?? null,
+      finalVerdict: run.multiAgent?.finalVerdict ?? null,
+      phaseGraph: run.phaseGraph ?? [],
+      activeAgentRunId: run.activeAgentRunId ?? null
+    },
+    agentRuns: {
+      total: agentRuns.length,
+      active: agentRuns.filter((item) => item.status === "running").length,
+      completed: agentRuns.filter((item) => item.status === "completed").length,
+      failed: agentRuns.filter((item) => item.status === "failed").length,
+      items: agentRuns
+    },
+    artifacts: {
+      total: artifacts.length,
+      latest: artifacts.slice(-5)
+    },
+    handoffs: {
+      total: handoffs.length,
+      pending: handoffs.filter((item) => item.status === "created").length,
+      consumed: handoffs.filter((item) => item.status === "consumed").length,
+      consultations: handoffs.filter((item) => item.consultation).length,
+      items: handoffs.slice(-5)
+    },
+    verdicts: {
+      total: verdicts.length,
+      latest: verdicts.at(-1) ?? null,
+      blocking: verdicts.filter((item) => item.status === "blocked" || item.status === "needs-rework").length,
+      items: verdicts.slice(-5)
+    },
+    retries: {
+      total: retries.length,
+      open: retries.filter((item) => item.status === "requested").length,
+      completed: retries.filter((item) => item.status === "completed").length,
+      exhausted: retries.filter((item) => item.status === "exhausted").length,
+      items: retries.slice(-5)
+    }
+  };
+}
+
+export async function readLatestTaskRunSurface(rootDir) {
+  return readTaskRunSurface(rootDir, "latest");
 }
 
 function getTaskRunPath(rootDir, runId) {
@@ -491,6 +576,25 @@ async function updateRunSummary(rootDir, runId, patch = {}, collectionUpdate = n
   }
 
   await writeJson(runPath, next);
+  return next;
+}
+
+async function updateRunCollectionRecord(rootDir, collection, runId, entityId, patch, summarizer, summaryCollection) {
+  const recordPath = getRunEntityPath(rootDir, collection, runId, entityId);
+  const current = await readJson(recordPath, null);
+  if (!current) {
+    throw new Error(`Run record "${entityId}" does not exist in ${collection}.`);
+  }
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString()
+  };
+  await writeJson(recordPath, next);
+  await updateRunSummary(rootDir, runId, {}, {
+    collection: summaryCollection,
+    summary: summarizer(next)
+  });
   return next;
 }
 
@@ -569,6 +673,7 @@ function summarizeHandoff(handoff) {
     toPhase: handoff.toPhase,
     reason: handoff.reason,
     consultation: handoff.consultation,
+    status: handoff.status,
     createdAt: handoff.createdAt
   };
 }
@@ -598,6 +703,16 @@ function summarizeRetryRequest(retryRequest) {
     status: retryRequest.status,
     createdAt: retryRequest.createdAt
   };
+}
+
+async function readLatestTaskRun(rootDir) {
+  const files = (await listFiles(path.join(rootDir, "state/runs"), ".json"))
+    .filter((filePath) => !filePath.endsWith("history.json"));
+  const latestPath = files.at(-1);
+  if (!latestPath) {
+    return null;
+  }
+  return readJson(latestPath, null);
 }
 
 function createEntityId(prefix) {

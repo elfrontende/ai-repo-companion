@@ -32,6 +32,7 @@ export async function ensureWorkspace(rootDir) {
     "state/runs",
     "state/runs/agent-runs",
     "state/runs/artifacts",
+    "state/runs/evaluations",
     "state/runs/handoffs",
     "state/runs/verdicts",
     "state/runs/retries",

@@ -16,6 +16,8 @@ import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.
 import { buildRuntimeReport, writeRuntimeReportHtml } from "./lib/runtime-report-engine.mjs";
 import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "./lib/benchmark-engine.mjs";
 import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
+import { readTaskRunSurface } from "./lib/run-engine.mjs";
+import { runMultiAgentEvaluation } from "./lib/multi-agent-eval-engine.mjs";
 
 // The CLI is intentionally thin.
 // It is mostly argument parsing plus command routing into the lib/ modules.
@@ -74,8 +76,14 @@ switch (command) {
   case "report":
     output(await runReport());
     break;
+  case "run":
+    output(await runRun(args));
+    break;
   case "benchmark":
     output(await runBenchmark(args));
+    break;
+  case "evaluate":
+    output(await runEvaluate(args));
     break;
   case "metrics":
     output(await runMetrics());
@@ -203,6 +211,14 @@ async function runReport() {
   };
 }
 
+async function runRun(args) {
+  return {
+    rootDir,
+    mode: "run",
+    run: await readTaskRunSurface(rootDir, args.runId ?? "latest")
+  };
+}
+
 async function runBenchmark(args = {}) {
   const iterations = Math.max(1, Number(args.iterations) || 1);
   const suite = args.suite ?? "mixed";
@@ -226,6 +242,17 @@ async function runMetrics() {
     rootDir,
     mode: "metrics",
     metrics: await summarizeReviewMetrics(rootDir)
+  };
+}
+
+async function runEvaluate(args) {
+  return {
+    rootDir,
+    mode: "evaluate",
+    evaluation: await runMultiAgentEvaluation(rootDir, systemConfig, {
+      suite: args.suite,
+      rolloutMode: args.rolloutMode
+    })
   };
 }
 
@@ -382,6 +409,7 @@ function helpText() {
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
       "node src/cli.mjs report",
+      "node src/cli.mjs run --runId latest",
       "node src/cli.mjs report --format html",
       "node src/cli.mjs report --format html --output ./runtime-report.html",
       "node src/cli.mjs benchmark",
@@ -390,6 +418,8 @@ function helpText() {
       "node src/cli.mjs benchmark --suite low-risk",
       "node src/cli.mjs benchmark --suite high-risk",
       "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",
+      "node src/cli.mjs evaluate",
+      "node src/cli.mjs evaluate --suite high-risk",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
       "node src/cli.mjs tune --phase cheap-domains",

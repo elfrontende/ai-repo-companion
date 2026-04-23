@@ -3,8 +3,9 @@ import path from "node:path";
 import { inspectReviewQueue } from "./review-worker.mjs";
 import { getWorkerState } from "./review-runner.mjs";
 import { summarizeReviewMetrics } from "./review-metrics-engine.mjs";
-import { readLatestTaskRunSummary } from "./run-engine.mjs";
+import { readLatestTaskRunSummary, readLatestTaskRunSurface } from "./run-engine.mjs";
 import { readJson } from "./store.mjs";
+import { readLatestMultiAgentEvaluation } from "./multi-agent-eval-engine.mjs";
 
 // Status/doctor commands are operator-facing helpers.
 // They intentionally summarize local runtime state instead of exposing raw
@@ -19,6 +20,8 @@ export async function getRuntimeStatus(rootDir, config = {}) {
   const benchmarkCycleSummary = await readBenchmarkCycleSummary(rootDir, config);
   const tuningSummary = await readTuningSummary(rootDir, config);
   const latestTaskRun = await readLatestTaskRunSummary(rootDir);
+  const latestRunSurface = await readLatestTaskRunSurface(rootDir);
+  const evaluationSummary = await readLatestMultiAgentEvaluation(rootDir);
   const costSummary = buildCostSummary(queue, metrics);
   return {
     queue,
@@ -26,6 +29,8 @@ export async function getRuntimeStatus(rootDir, config = {}) {
     metrics,
     costSummary,
     latestTaskRun,
+    latestRunSurface,
+    evaluationSummary,
     benchmarkSummary,
     benchmarkCycleSummary,
     tuningSummary,
@@ -46,6 +51,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
   const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
   const benchmarkCycleSummary = await readBenchmarkCycleSummary(rootDir, config);
   const tuningSummary = await readTuningSummary(rootDir, config);
+  const latestRunSurface = await readLatestTaskRunSurface(rootDir);
   const findings = [];
 
   if (worker.status === "running" && queue.running === 0) {
@@ -53,6 +59,46 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
       severity: "warning",
       code: "worker-state-mismatch",
       message: "Worker state says running, but the queue has no running jobs."
+    });
+  }
+
+  if (latestRunSurface.available && latestRunSurface.agentRuns.failed > 0) {
+    findings.push({
+      severity: "warning",
+      code: "agent-run-failed",
+      message: `The latest task run has ${latestRunSurface.agentRuns.failed} failed agent run(s).`
+    });
+  }
+
+  if (latestRunSurface.available && latestRunSurface.handoffs.pending > 0 && latestRunSurface.run.multiAgentStatus !== "running") {
+    findings.push({
+      severity: "warning",
+      code: "handoff-stalled",
+      message: `The latest task run still has ${latestRunSurface.handoffs.pending} unconsumed handoff(s).`
+    });
+  }
+
+  if (latestRunSurface.available && latestRunSurface.verdicts.blocking > 0 && latestRunSurface.retries.open === 0 && latestRunSurface.run.multiAgentStatus !== "blocked") {
+    findings.push({
+      severity: "warning",
+      code: "needs-rework-without-retry",
+      message: "The latest task run has blocking verifier feedback but no open retry request."
+    });
+  }
+
+  if (latestRunSurface.available && latestRunSurface.retries.exhausted > 0) {
+    findings.push({
+      severity: "warning",
+      code: "retry-exhausted",
+      message: `The latest task run exhausted ${latestRunSurface.retries.exhausted} bounded retry path(s).`
+    });
+  }
+
+  if (latestRunSurface.available && latestRunSurface.run.multiAgentStatus === "blocked") {
+    findings.push({
+      severity: "warning",
+      code: "run-stage-stalled",
+      message: `The latest task run is blocked in phase ${latestRunSurface.run.currentPhase ?? "unknown"}.`
     });
   }
 
@@ -268,6 +314,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     compactSummary: buildDoctorCompactSummary(findings),
     recovery,
     lock: lock ?? {},
+    latestRunSurface,
     findings
   };
 }
@@ -756,6 +803,12 @@ function buildDoctorRecommendedActions(findings) {
     75,
     "node src/cli.mjs worker --maxJobs 1",
     "A single worker pass should clear stale runtime state or finish recovery."
+  );
+  push(
+    findings.some((item) => ["agent-run-failed", "handoff-stalled", "needs-rework-without-retry", "retry-exhausted", "run-stage-stalled"].includes(item.code)),
+    78,
+    "node src/cli.mjs run --runId latest",
+    "The latest multi-agent run needs drilldown before more task execution proceeds."
   );
 
   return actions

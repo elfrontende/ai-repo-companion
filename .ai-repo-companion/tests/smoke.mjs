@@ -42,7 +42,8 @@ import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "../src/lib/be
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
-import { readLatestTaskRunSummary, readTaskRun } from "../src/lib/run-engine.mjs";
+import { readLatestTaskRunSummary, readTaskRun, readTaskRunSurface } from "../src/lib/run-engine.mjs";
+import { runMultiAgentEvaluation } from "../src/lib/multi-agent-eval-engine.mjs";
 
 // This file is intentionally broad instead of split into dozens of tiny test
 // files. The project behaves like one integrated runtime, so the smoke suite
@@ -1838,6 +1839,7 @@ const htmlReport = await writeRuntimeReportHtml(statusRoot, statusConfig, path.j
 const htmlPayload = await fs.readFile(htmlReport.outputPath, "utf8");
 assert.match(htmlPayload, /<title>AI Repo Companion Runtime Report<\/title>/i);
 assert.match(htmlPayload, /Runtime Report/i);
+assert.match(htmlPayload, /Execution/i);
 assert.match(htmlPayload, /Before \/ After/i);
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
@@ -2508,12 +2510,49 @@ const latestTaskRunSummary = await readLatestTaskRunSummary(tempRoot);
 assert.equal(latestTaskRunSummary.available, true);
 assert.equal(latestTaskRunSummary.id, taskFlowResult.run.id);
 assert.equal(latestTaskRunSummary.reviewStatus, "processed");
+assert.ok(latestTaskRunSummary.agentRunCount >= 4);
+assert.ok(latestTaskRunSummary.handoffCount >= 1);
+const latestRunSurface = await readTaskRunSurface(tempRoot, taskFlowResult.run.id);
+assert.equal(latestRunSurface.available, true);
+assert.equal(latestRunSurface.run.id, taskFlowResult.run.id);
+assert.ok(latestRunSurface.agentRuns.total >= 4);
+assert.ok(latestRunSurface.handoffs.total >= 1);
+assert.ok(latestRunSurface.verdicts.total >= 1);
+assert.ok(["completed", "blocked", "advisory"].includes(latestRunSurface.run.multiAgentStatus));
 const taskFlowRuntimeStatus = await getRuntimeStatus(tempRoot, config);
 assert.equal(taskFlowRuntimeStatus.latestTaskRun.available, true);
 assert.equal(taskFlowRuntimeStatus.latestTaskRun.id, taskFlowResult.run.id);
+assert.equal(taskFlowRuntimeStatus.latestRunSurface.available, true);
+assert.equal(taskFlowRuntimeStatus.latestRunSurface.run.id, taskFlowResult.run.id);
 const taskFlowRuntimeReport = await buildRuntimeReport(tempRoot, config);
 assert.equal(taskFlowRuntimeReport.overview.latestRun.available, true);
 assert.equal(taskFlowRuntimeReport.overview.latestRun.id, taskFlowResult.run.id);
+assert.equal(taskFlowRuntimeReport.execution.available, true);
+assert.ok(taskFlowRuntimeReport.execution.agentRuns.total >= 4);
+
+const runCli = await execFileAsync(
+  "node",
+  ["src/cli.mjs", "run", "--runId", "latest"],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: tempRoot
+    }
+  }
+);
+const runCliPayload = JSON.parse(runCli.stdout);
+assert.equal(runCliPayload.mode, "run");
+assert.equal(runCliPayload.run.available, true);
+assert.equal(runCliPayload.run.run.id, taskFlowResult.run.id);
+
+const evalResult = await runMultiAgentEvaluation(tempRoot, config, {});
+assert.equal(evalResult.report.scenarioCount, 3);
+assert.ok(evalResult.report.aggregate.averageCoverageDelta > 0);
+const taskEvalStatus = await getRuntimeStatus(tempRoot, config);
+assert.equal(taskEvalStatus.evaluationSummary.loaded, true);
+const taskEvalReport = await buildRuntimeReport(tempRoot, config);
+assert.equal(taskEvalReport.evaluation.loaded, true);
 
 const cursorStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-cursor-stub-"));
 const cursorStubPath = path.join(cursorStubDir, "cursor-stub.mjs");
