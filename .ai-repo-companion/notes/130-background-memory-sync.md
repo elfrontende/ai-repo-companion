@@ -1,6 +1,7 @@
 ---
 id: z-130-background-memory-sync
 title: Background memory synchronization
+scope: system
 kind: architecture
 tags: memory,background,sync,events,links,память,памʼять,фон
 links: z-110-atomic-notes,z-000-index,z-100-context-minimization,z-120-agent-orchestration

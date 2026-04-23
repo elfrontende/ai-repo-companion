@@ -1,6 +1,7 @@
 ---
 id: z-000-index
 title: Knowledge index
+scope: system
 kind: index
 tags: index,knowledge,entrypoint
 links: z-130-background-memory-sync,z-110-atomic-notes,z-100-context-minimization,z-120-agent-orchestration

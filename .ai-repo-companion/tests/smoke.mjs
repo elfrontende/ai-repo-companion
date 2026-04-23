@@ -93,6 +93,13 @@ const context = assembleContext("optimize context retrieval with atomic notes", 
 assert.ok(context.selectedNotes.length > 0);
 assert.ok(context.usedTokens <= 500);
 
+const hostTaskContext = assembleContext("fix a typo and tighten wording in the deployment README", notes, {
+  tokenBudget: 500,
+  maxNotes: 4
+});
+
+assert.equal(hostTaskContext.selectedNotes.length, 0);
+
 const sync = await syncMemory(
   tempRoot,
   {
@@ -113,6 +120,34 @@ assert.equal(policyOutcome.queuedJob.mode, "expensive");
 const workingMemory = await readJson(path.join(tempRoot, "state/memory/working-memory.json"), {});
 assert.ok(workingMemory.hotNoteIds.length >= 1);
 assert.ok(workingMemory.recentEventIds.length >= 1);
+
+const repoTaskRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-repo-task-"));
+await fs.cp(path.resolve("config"), path.join(repoTaskRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(repoTaskRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(repoTaskRoot, "state"), { recursive: true });
+await ensureWorkspace(repoTaskRoot);
+
+const originalIndexNote = await fs.readFile(path.join(repoTaskRoot, "notes/000-index.md"), "utf8");
+const repoTaskSync = await syncMemory(
+  repoTaskRoot,
+  {
+    task: "fix a typo and tighten wording in the deployment README",
+    summary: "Clarified deployment wording and removed repeated guidance.",
+    artifacts: ["docs"]
+  },
+  config
+);
+
+assert.match(repoTaskSync.touchedNoteId, /^z-task-/);
+const updatedIndexNote = await fs.readFile(path.join(repoTaskRoot, "notes/000-index.md"), "utf8");
+assert.equal(updatedIndexNote, originalIndexNote);
+const repoTaskNotes = await loadNotes(repoTaskRoot);
+const repoTaskContext = assembleContext("fix a typo and tighten wording in the deployment README", repoTaskNotes, {
+  tokenBudget: 500,
+  maxNotes: 4
+});
+assert.ok(repoTaskContext.selectedNotes.some((note) => note.id === repoTaskSync.touchedNoteId));
+assert.equal(repoTaskContext.selectedNotes.some((note) => note.scope === "system"), false);
 
 const reviewQueue = await readJson(path.join(tempRoot, "state/memory/review-queue.json"), []);
 assert.ok(reviewQueue.length >= 1);

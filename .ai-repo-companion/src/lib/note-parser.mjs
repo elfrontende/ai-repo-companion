@@ -2,6 +2,133 @@
 // The workspace only needs lightweight frontmatter support and cheap token
 // heuristics, not a full Markdown or YAML parser dependency.
 
+const taskStopwords = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "in",
+  "into",
+  "of",
+  "on",
+  "or",
+  "the",
+  "this",
+  "to",
+  "with",
+  "after",
+  "before",
+  "during",
+  "via",
+  "within",
+  "across",
+  "та",
+  "або",
+  "для",
+  "до",
+  "з",
+  "зі",
+  "із",
+  "й",
+  "на",
+  "над",
+  "перед",
+  "після",
+  "по",
+  "при",
+  "про",
+  "такий",
+  "у",
+  "в",
+  "це",
+  "через",
+  "щоб",
+  "як"
+]);
+
+const genericTaskTokens = new Set([
+  "add",
+  "align",
+  "build",
+  "capture",
+  "clarify",
+  "create",
+  "design",
+  "document",
+  "fix",
+  "implement",
+  "improve",
+  "investigate",
+  "plan",
+  "polish",
+  "prepare",
+  "refresh",
+  "remove",
+  "review",
+  "rewrite",
+  "support",
+  "tighten",
+  "update",
+  "verify",
+  "задокументувати",
+  "зробити",
+  "оновити",
+  "оптимізувати",
+  "перевірити",
+  "підготувати",
+  "покращити",
+  "прибрати",
+  "спланувати",
+  "створити",
+  "уточнити",
+  "додати",
+  "переписати",
+  "вирівняти"
+]);
+
+const companionTaskKeywords = [
+  "agent",
+  "benchmark",
+  "companion",
+  "context",
+  "cost",
+  "memory",
+  "note",
+  "notes",
+  "orchestration",
+  "policy",
+  "provider",
+  "queue",
+  "retrieval",
+  "review",
+  "runtime",
+  "tuning",
+  "worker",
+  "workspace",
+  "zettelkasten",
+  "агент",
+  "агенти",
+  "бенчмарк",
+  "воркер",
+  "контекст",
+  "нотатки",
+  "оркестрація",
+  "память",
+  "памʼять",
+  "памятью",
+  "провайдер",
+  "ретривал",
+  "ревю",
+  "черга",
+  "політика",
+  "тюнінг"
+];
+
 export function parseFrontmatter(markdown) {
   const trimmed = markdown.trimStart();
   if (!trimmed.startsWith("---\n")) {
@@ -60,6 +187,19 @@ export function estimateTokens(text) {
   // A rough 4-chars-per-token estimate is "good enough" for retrieval
   // budgeting and keeps the runtime dependency-free.
   return Math.max(1, Math.ceil(text.trim().length / 4));
+}
+
+export function extractMeaningfulTaskTokens(text, options = {}) {
+  const limit = Math.max(1, Number(options.limit) || 6);
+  return tokenize(text)
+    .filter((token) => !taskStopwords.has(token))
+    .filter((token) => !genericTaskTokens.has(token))
+    .slice(0, limit);
+}
+
+export function isCompanionTask(taskOrTokens) {
+  const tokens = Array.isArray(taskOrTokens) ? taskOrTokens : tokenize(taskOrTokens);
+  return tokens.some((token) => companionTaskKeywords.some((keyword) => roughTokenMatch(token, keyword)));
 }
 
 export function slugify(value) {
