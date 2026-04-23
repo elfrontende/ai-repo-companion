@@ -19,6 +19,7 @@
     "metrics": "node src/cli.mjs metrics",
     "tune": "node src/cli.mjs tune",
     "review": "node src/cli.mjs review",
+    "approve": "node src/cli.mjs approve",
     "worker": "node src/cli.mjs worker",
     "demo": "node src/cli.mjs demo",
     "test": "node tests/smoke.mjs"

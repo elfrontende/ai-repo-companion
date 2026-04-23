@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { ensureWorkspace } from "../src/lib/bootstrap.mjs";
 import { readJson, writeJson } from "../src/lib/store.mjs";
 import { classifyTask } from "../src/lib/task-engine.mjs";
@@ -11,7 +13,6 @@ import { syncMemory } from "../src/lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "../src/lib/policy-engine.mjs";
 import {
   applyReviewRetention,
-  approvePendingReview,
   inspectReviewQueue,
   planReviewNoteChanges,
   processReviewQueue
@@ -46,6 +47,11 @@ import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
 // files. The project behaves like one integrated runtime, so the smoke suite
 // focuses on "can the main loops still work together?" rather than only
 // micro-testing isolated helpers.
+
+const execFileAsync = promisify(execFile);
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const packageJson = await readJson(path.resolve("package.json"), {});
+assert.equal(packageJson.scripts?.approve, "node src/cli.mjs approve");
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -580,8 +586,20 @@ assert.equal(approvalQueueBeforeApply.awaitingApproval, 1);
 
 const approvalNotePath = path.join(approvalRoot, "notes/130-background-memory-sync.md");
 const approvalBefore = await fs.readFile(approvalNotePath, "utf8");
-const approvalResult = await approvePendingReview(approvalRoot, approvalJob.id, approvalConfig);
-assert.equal(approvalResult.status, "approved");
+const approvalCli = await execFileAsync(
+  npmCommand,
+  ["run", "--silent", "approve", "--", "--jobId", approvalJob.id],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: approvalRoot
+    }
+  }
+);
+const approvalResult = JSON.parse(approvalCli.stdout);
+assert.equal(approvalResult.mode, "approve");
+assert.equal(approvalResult.result.status, "approved");
 
 const approvalAfter = await fs.readFile(approvalNotePath, "utf8");
 assert.notEqual(approvalAfter, approvalBefore);
