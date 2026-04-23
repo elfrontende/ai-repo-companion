@@ -123,12 +123,14 @@ export async function runOrchestratedTask(rootDir, config, payload = {}) {
   }
 
   const run = await readTaskRun(rootDir, runId);
-  const finalVerdict = chooseFinalVerdict(run?.verdicts ?? []);
+  const finalVerdict = chooseFinalVerdict(run?.verdicts ?? [], run?.retryRequests ?? []);
   const finalRun = await updateTaskRun(rootDir, runId, {
     multiAgent: {
       status: finalVerdict.status === "blocked"
         ? "blocked"
-        : (rollout.rolloutMode === "advisory" ? "advisory" : "completed"),
+        : finalVerdict.status === "needs-rework"
+          ? "needs-rework"
+          : (rollout.rolloutMode === "advisory" ? "advisory" : "completed"),
       currentPhase: "completed",
       finalVerdict
     }
@@ -284,7 +286,14 @@ async function executePhase(rootDir, config, payload, phase, state, rollout, opt
       output: {
         adapter: execution.adapter,
         artifacts: execution.output.artifacts.length,
-        verdict: execution.output.verdict.status
+        verdict: execution.output.verdict.status,
+        usageSummary: execution.usage ?? null,
+        attempts: execution.attempts?.map((item) => ({
+          attempt: item.attempt,
+          status: item.status,
+          exitCode: item.exitCode,
+          durationMs: item.durationMs
+        })) ?? []
       }
     });
   }
@@ -427,13 +436,17 @@ function pickOwnerPhase(phaseGraph, verifierPhaseId) {
     ?? null;
 }
 
-function chooseFinalVerdict(verdicts) {
+function chooseFinalVerdict(verdicts, retryRequests = []) {
   const latestBlocking = [...verdicts].reverse().find((verdict) => verdict.status === "blocked");
   if (latestBlocking) {
     return latestBlocking;
   }
   const latestRework = [...verdicts].reverse().find((verdict) => verdict.status === "needs-rework");
   if (latestRework) {
+    const exhaustedRetry = [...retryRequests].reverse().find((retryRequest) => retryRequest.status === "exhausted");
+    if (!exhaustedRetry) {
+      return latestRework;
+    }
     return {
       ...latestRework,
       status: "blocked",

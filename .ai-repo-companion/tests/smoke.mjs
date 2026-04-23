@@ -2518,7 +2518,7 @@ assert.equal(latestRunSurface.run.id, taskFlowResult.run.id);
 assert.ok(latestRunSurface.agentRuns.total >= 4);
 assert.ok(latestRunSurface.handoffs.total >= 1);
 assert.ok(latestRunSurface.verdicts.total >= 1);
-assert.ok(["completed", "blocked", "advisory"].includes(latestRunSurface.run.multiAgentStatus));
+assert.ok(["completed", "blocked", "needs-rework", "advisory"].includes(latestRunSurface.run.multiAgentStatus));
 const taskFlowRuntimeStatus = await getRuntimeStatus(tempRoot, config);
 assert.equal(taskFlowRuntimeStatus.latestTaskRun.available, true);
 assert.equal(taskFlowRuntimeStatus.latestTaskRun.id, taskFlowResult.run.id);
@@ -2553,6 +2553,95 @@ const taskEvalStatus = await getRuntimeStatus(tempRoot, config);
 assert.equal(taskEvalStatus.evaluationSummary.loaded, true);
 const taskEvalReport = await buildRuntimeReport(tempRoot, config);
 assert.equal(taskEvalReport.evaluation.loaded, true);
+
+const agentCodexRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-codex-"));
+await fs.cp(path.resolve("config"), path.join(agentCodexRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(agentCodexRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(agentCodexRoot, "state"), { recursive: true });
+await ensureWorkspace(agentCodexRoot);
+
+const agentCodexStubPath = path.join(agentCodexRoot, "codex-agent-stub.mjs");
+await fs.writeFile(agentCodexStubPath, `#!/usr/bin/env node
+import fs from "node:fs/promises";
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", async () => {
+  const outputIndex = process.argv.indexOf("--output-last-message");
+  const outputPath = outputIndex >= 0 ? process.argv[outputIndex + 1] : "";
+  const phaseMatch = input.match(/Phase:\\s*(.+)/);
+  const agentMatch = input.match(/Agent:\\s*(.+)/);
+  const phase = phaseMatch ? phaseMatch[1].trim() : "delivery";
+  const agent = agentMatch ? agentMatch[1].trim() : "Agent";
+  const artifactByPhase = {
+    triage: { kind: "task-brief", title: "Codex task brief", summary: "Codex stub planned the run.", content: "- Prepared the task brief." },
+    planning: { kind: "acceptance-criteria", title: "Codex acceptance criteria", summary: "Codex stub clarified scope.", content: "- Clarified scope and acceptance criteria." },
+    design: { kind: "design-note", title: "Codex design note", summary: "Codex stub prepared a design note.", content: "- Captured the design boundaries." },
+    delivery: { kind: "change-plan", title: "Codex change plan", summary: "Codex stub prepared the delivery plan.", content: "- Prepared the implementation slice." },
+    verification: { kind: agent.includes("Security") ? "security-review" : "verification-report", title: "Codex verification", summary: "Codex stub verified the phase.", content: "- Verification and rollback guidance look sufficient." },
+    consolidation: { kind: "final-decision", title: "Codex final decision", summary: "Codex stub consolidated the run.", content: "- Consolidated the run for finalization." },
+    "memory-capture": { kind: "sync-brief", title: "Codex sync brief", summary: "Codex stub captured the memory sync brief.", content: "- Captured the durable run summary." }
+  };
+  const verdictStatus = phase === "verification" ? "pass" : "info";
+  const payload = {
+    summary: "Codex stub generated a structured agent step output.",
+    artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
+    handoffs: [],
+    consultations: [],
+    verdict: {
+      status: verdictStatus,
+      summary: verdictStatus === "pass" ? "Codex stub passed the verification step." : "Codex stub completed the phase.",
+      findings: []
+    }
+  };
+  await fs.writeFile(outputPath, JSON.stringify(payload, null, 2), "utf8");
+  process.stdout.write("tokens used 42\\n");
+});
+process.stdin.resume();
+`, "utf8");
+await fs.chmod(agentCodexStubPath, 0o755);
+
+const agentCodexConfig = await readJson(path.join(agentCodexRoot, "config/system.json"), {});
+agentCodexConfig.multiAgentRuntime = {
+  ...(agentCodexConfig.multiAgentRuntime ?? {}),
+  defaultAdapter: "codex-native",
+  nativeCodex: {
+    ...(agentCodexConfig.multiAgentRuntime?.nativeCodex ?? {}),
+    enabled: true,
+    binary: agentCodexStubPath,
+    model: "stub-agent-model",
+    retryBackoffMs: 0
+  }
+};
+await writeJson(path.join(agentCodexRoot, "config/system.json"), agentCodexConfig);
+
+const agentCodexRun = await runTaskFlow(agentCodexRoot, agentCodexConfig, {
+  task: "tighten deployment README wording and remove repeated guidance",
+  summary: "Let the codex-backed multi-agent runtime process a routine docs task."
+});
+assert.equal(agentCodexRun.orchestration.rolloutMode, "active");
+const agentCodexSurface = await readTaskRunSurface(agentCodexRoot, agentCodexRun.run.id);
+assert.equal(agentCodexSurface.available, true);
+assert.ok(agentCodexSurface.agentRuns.total >= 4);
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.adapter === "codex-native"));
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.usageSummary.durationMs >= 0));
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.attempts.length >= 1));
+
+const agentCodexCli = await execFileAsync(
+  "node",
+  ["src/cli.mjs", "task", "--task", "tighten deployment README wording and remove repeated guidance", "--summary", "Drive the agent runtime through the CLI.", "--agentLive"],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: agentCodexRoot
+    }
+  }
+);
+const agentCodexCliPayload = JSON.parse(agentCodexCli.stdout);
+assert.equal(agentCodexCliPayload.mode, "task");
+assert.equal(agentCodexCliPayload.runtimeAgentConfig.nativeCodex.enabled, true);
+assert.equal(agentCodexCliPayload.runtimeAgentConfig.defaultAdapter, "codex-native");
 
 const cursorStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-cursor-stub-"));
 const cursorStubPath = path.join(cursorStubDir, "cursor-stub.mjs");

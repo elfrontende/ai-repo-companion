@@ -246,13 +246,15 @@ async function runMetrics() {
 }
 
 async function runEvaluate(args) {
+  const runtimeConfig = buildRuntimeAgentConfig(systemConfig, args);
   return {
     rootDir,
     mode: "evaluate",
-    evaluation: await runMultiAgentEvaluation(rootDir, systemConfig, {
+    evaluation: await runMultiAgentEvaluation(rootDir, runtimeConfig, {
       suite: args.suite,
       rolloutMode: args.rolloutMode
-    })
+    }),
+    runtimeAgentConfig: describeRuntimeAgentConfig(runtimeConfig)
   };
 }
 
@@ -271,20 +273,21 @@ async function runTune(args) {
 }
 
 async function runTask(args) {
-  const reviewConfig = buildRuntimeReviewConfig(systemConfig, args);
+  const runtimeConfig = buildRuntimeAgentConfig(buildRuntimeReviewConfig(systemConfig, args), args);
 
   return {
     rootDir,
     mode: "task",
-    flow: await runTaskFlow(rootDir, systemConfig, {
+    flow: await runTaskFlow(rootDir, runtimeConfig, {
       task: args.task,
       summary: args.summary,
       artifacts: splitCsv(args.artifacts),
       budget: args.budget,
       reviewNow: args.reviewNow,
-      reviewConfig
+      reviewConfig: runtimeConfig
     }),
-    runtimeReviewConfig: describeRuntimeReviewConfig(reviewConfig)
+    runtimeReviewConfig: describeRuntimeReviewConfig(runtimeConfig),
+    runtimeAgentConfig: describeRuntimeAgentConfig(runtimeConfig)
   };
 }
 
@@ -402,6 +405,8 @@ function helpText() {
       "node src/cli.mjs sync --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\"",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive --agentModel gpt-5.4",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --reviewNow --live --costMode saver",
       "node src/cli.mjs review --jobId memjob-123 --live --costMode strict --reviewProfile heavy",
       "node src/cli.mjs task --task \"capture auth rollout learnings\" --summary \"Collapsed duplicate auth notes\" --artifacts \"notes,worker\" --reviewNow --live --provider cursor",
@@ -419,6 +424,7 @@ function helpText() {
       "node src/cli.mjs benchmark --suite high-risk",
       "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",
       "node src/cli.mjs evaluate",
+      "node src/cli.mjs evaluate --agentLive --suite high-risk",
       "node src/cli.mjs evaluate --suite high-risk",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
@@ -485,6 +491,36 @@ function buildRuntimeReviewConfig(baseConfig, args) {
   }
 
   config.reviewExecution = execution;
+  return config;
+}
+
+function buildRuntimeAgentConfig(baseConfig, args) {
+  const config = structuredClone(baseConfig);
+  config.multiAgentRuntime = {
+    ...(config.multiAgentRuntime ?? {})
+  };
+
+  if (args.agentAdapter) {
+    config.multiAgentRuntime.defaultAdapter = args.agentAdapter;
+  }
+
+  if (!args.agentLive) {
+    return config;
+  }
+
+  config.multiAgentRuntime.defaultAdapter = "codex-native";
+  config.multiAgentRuntime.nativeCodex = {
+    ...(config.multiAgentRuntime.nativeCodex ?? {}),
+    enabled: true
+  };
+
+  if (args.agentModel) {
+    config.multiAgentRuntime.nativeCodex.model = args.agentModel;
+  }
+  if (args.agentSandbox) {
+    config.multiAgentRuntime.nativeCodex.sandbox = args.agentSandbox;
+  }
+
   return config;
 }
 
@@ -573,6 +609,22 @@ function describeRuntimeReviewConfig(config) {
     runtimeLock: {
       enabled: config.reviewExecution?.runtimeLock?.enabled !== false,
       maxAgeMinutes: config.reviewExecution?.runtimeLock?.maxAgeMinutes ?? 15
+    }
+  };
+}
+
+function describeRuntimeAgentConfig(config) {
+  return {
+    rolloutMode: config.multiAgentRuntime?.rolloutMode ?? "active",
+    defaultAdapter: config.multiAgentRuntime?.defaultAdapter ?? "local-contract",
+    maxReworkLoops: config.multiAgentRuntime?.maxReworkLoops ?? 2,
+    nativeCodex: {
+      enabled: config.multiAgentRuntime?.nativeCodex?.enabled ?? false,
+      binary: config.multiAgentRuntime?.nativeCodex?.binary ?? "codex",
+      model: config.multiAgentRuntime?.nativeCodex?.model ?? "",
+      sandbox: config.multiAgentRuntime?.nativeCodex?.sandbox ?? "workspace-write",
+      maxAttempts: config.multiAgentRuntime?.nativeCodex?.maxAttempts ?? 2,
+      retryBackoffMs: config.multiAgentRuntime?.nativeCodex?.retryBackoffMs ?? 1500
     }
   };
 }

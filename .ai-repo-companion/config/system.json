@@ -17,7 +17,16 @@
     "defaultAdapter": "local-contract",
     "maxReworkLoops": 2,
     "allowConsultations": true,
-    "requireWritableOwnerForRework": true
+    "requireWritableOwnerForRework": true,
+    "nativeCodex": {
+      "enabled": false,
+      "binary": "codex",
+      "model": "",
+      "sandbox": "workspace-write",
+      "maxAttempts": 2,
+      "retryBackoffMs": 1500,
+      "extraArgs": []
+    }
   },
   "memoryPolicy": {
     "defaultMode": "cheap",

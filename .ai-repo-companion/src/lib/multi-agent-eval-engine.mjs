@@ -147,6 +147,9 @@ function scoreRunSurface(surface) {
   if (surface.run.finalVerdict?.status === "blocked") {
     score -= 2;
   }
+  if (surface.run.finalVerdict?.status === "needs-rework") {
+    score -= 1;
+  }
   return score;
 }
 
@@ -160,7 +163,7 @@ function buildAggregate(results) {
     if (item.active.retries > 0) {
       acc.reworkedScenarios += 1;
     }
-    if (item.active.finalVerdict === "blocked") {
+    if (item.active.finalVerdict === "blocked" || item.active.finalVerdict === "needs-rework") {
       acc.blockedScenarios += 1;
     }
     return acc;
