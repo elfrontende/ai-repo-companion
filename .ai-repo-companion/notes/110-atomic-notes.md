@@ -1,6 +1,7 @@
 ---
 id: z-110-atomic-notes
 title: Atomic Zettelkasten notes
+scope: system
 kind: principle
 tags: zettelkasten,notes,atomic,linking,нотатки,атомарні
 links: z-100-context-minimization,z-130-background-memory-sync,z-000-index,z-120-agent-orchestration

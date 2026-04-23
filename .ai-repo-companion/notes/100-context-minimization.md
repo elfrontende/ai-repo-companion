@@ -1,6 +1,7 @@
 ---
 id: z-100-context-minimization
 title: Context minimization pipeline
+scope: system
 kind: principle
 tags: context,tokens,retrieval,budget,контекст,токени
 links: z-110-atomic-notes,z-130-background-memory-sync,z-000-index,z-120-agent-orchestration

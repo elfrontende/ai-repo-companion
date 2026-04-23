@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { listFiles } from "./store.mjs";
-import { estimateTokens, parseFrontmatter, roughTokenMatch, tokenize } from "./note-parser.mjs";
+import { estimateTokens, isCompanionTask, parseFrontmatter, roughTokenMatch, tokenize } from "./note-parser.mjs";
 
 // Context assembly is the cheapest big win in the whole project.
 // Instead of sending "everything we know" to the model, we rank notes and
@@ -18,6 +18,7 @@ export async function loadNotes(rootDir) {
     notes.push({
       filePath,
       ...meta,
+      scope: normalizeScope(meta.scope),
       tags: normalizeArray(meta.tags),
       links: normalizeArray(meta.links),
       body,
@@ -37,11 +38,12 @@ export function assembleContext(task, notes, options = {}) {
   const maxNotes = options.maxNotes ?? 6;
   const taskTokens = tokenize(task);
   const noteById = new Map(notes.map((note) => [note.id, note]));
+  const companionTask = isCompanionTask(taskTokens);
 
   const ranked = notes
     .map((note) => ({
       note,
-      score: scoreNote(note, taskTokens, noteById)
+      score: scoreNote(note, taskTokens, noteById, { companionTask })
     }))
     .filter((entry) => entry.score > 0)
     .sort((left, right) => right.score - left.score || left.note.tokenEstimate - right.note.tokenEstimate);
@@ -60,6 +62,7 @@ export function assembleContext(task, notes, options = {}) {
       id: entry.note.id,
       title: entry.note.title,
       kind: entry.note.kind,
+      scope: entry.note.scope,
       score: round(entry.score),
       tokenEstimate: entry.note.tokenEstimate,
       tags: entry.note.tags,
@@ -77,10 +80,14 @@ export function assembleContext(task, notes, options = {}) {
   };
 }
 
-function scoreNote(note, taskTokens, noteById) {
+function scoreNote(note, taskTokens, noteById, options = {}) {
   // We bias toward structured signals before body text:
   // tags > title > tags tokenized again > body > linked neighbors.
   // This keeps retrieval stable even when note bodies grow over time.
+  if (note.scope === "system" && options.companionTask !== true) {
+    return 0;
+  }
+
   const titleTokens = tokenize(note.title ?? "");
   const bodyTokens = tokenize(note.body ?? "");
   const tagTokens = note.tags.flatMap((tag) => tokenize(tag));
@@ -129,6 +136,10 @@ function normalizeArray(value) {
     return [];
   }
   return Array.isArray(value) ? value : [value];
+}
+
+function normalizeScope(value) {
+  return value === "system" ? "system" : "repo";
 }
 
 function matchesAny(token, collection) {
