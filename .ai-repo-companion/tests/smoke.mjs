@@ -42,6 +42,7 @@ import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "../src/lib/be
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
+import { readLatestTaskRunSummary, readTaskRun } from "../src/lib/run-engine.mjs";
 
 // This file is intentionally broad instead of split into dozens of tiny test
 // files. The project behaves like one integrated runtime, so the smoke suite
@@ -2495,6 +2496,24 @@ assert.equal(taskFlowResult.review.status, "processed");
 assert.equal(taskFlowResult.review.result.processedCount, 1);
 assert.equal(taskFlowResult.review.result.processed[0].adapter, "dry-run");
 assert.equal(taskFlowResult.policyOutcome.queuedJob.id, taskFlowResult.review.queuedJobId);
+assert.ok(taskFlowResult.run.id.startsWith("run-"));
+assert.equal(taskFlowResult.run.status, "completed");
+const storedTaskRun = await readTaskRun(tempRoot, taskFlowResult.run.id);
+assert.equal(storedTaskRun.status, "completed");
+assert.equal(storedTaskRun.task, "document a medium-risk auth review handoff");
+assert.equal(storedTaskRun.review.queuedJobId, taskFlowResult.review.queuedJobId);
+assert.equal(storedTaskRun.plan.agents.some((agent) => agent.id === "orchestrator"), true);
+assert.ok(storedTaskRun.plan.agents.length >= 2);
+const latestTaskRunSummary = await readLatestTaskRunSummary(tempRoot);
+assert.equal(latestTaskRunSummary.available, true);
+assert.equal(latestTaskRunSummary.id, taskFlowResult.run.id);
+assert.equal(latestTaskRunSummary.reviewStatus, "processed");
+const taskFlowRuntimeStatus = await getRuntimeStatus(tempRoot, config);
+assert.equal(taskFlowRuntimeStatus.latestTaskRun.available, true);
+assert.equal(taskFlowRuntimeStatus.latestTaskRun.id, taskFlowResult.run.id);
+const taskFlowRuntimeReport = await buildRuntimeReport(tempRoot, config);
+assert.equal(taskFlowRuntimeReport.overview.latestRun.available, true);
+assert.equal(taskFlowRuntimeReport.overview.latestRun.id, taskFlowResult.run.id);
 
 const cursorStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-cursor-stub-"));
 const cursorStubPath = path.join(cursorStubDir, "cursor-stub.mjs");

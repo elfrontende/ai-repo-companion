@@ -44,6 +44,14 @@ function buildOverview(status) {
       running: status.queue.running,
       awaitingApproval: status.queue.awaitingApproval
     },
+    latestRun: {
+      available: status.latestTaskRun?.available === true,
+      id: status.latestTaskRun?.id ?? null,
+      status: status.latestTaskRun?.status ?? null,
+      currentStage: status.latestTaskRun?.currentStage ?? null,
+      task: status.latestTaskRun?.task ?? null,
+      reviewStatus: status.latestTaskRun?.reviewStatus ?? null
+    },
     liveTokensUsed: status.costSummary.liveTokensUsed,
     avgTokensPerRun: status.costSummary.avgTokensPerRun,
     canaryStatus: status.tuningSummary.canaryStatus ?? "none",

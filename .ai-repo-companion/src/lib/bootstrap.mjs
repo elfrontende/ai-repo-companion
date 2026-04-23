@@ -5,6 +5,7 @@ import { ensureDir, ensureFile } from "./store.mjs";
 const seedFiles = [
   "config/system.json",
   "state/agents/registry.json",
+  "state/runs/history.jsonl",
   "state/memory/working-memory.json",
   "state/memory/events.jsonl",
   "state/memory/policy-state.json",
@@ -28,6 +29,7 @@ export async function ensureWorkspace(rootDir) {
     "config",
     "notes",
     "state/agents",
+    "state/runs",
     "state/benchmarks",
     "state/memory",
     "state/reviews",

@@ -3,6 +3,7 @@ import path from "node:path";
 import { inspectReviewQueue } from "./review-worker.mjs";
 import { getWorkerState } from "./review-runner.mjs";
 import { summarizeReviewMetrics } from "./review-metrics-engine.mjs";
+import { readLatestTaskRunSummary } from "./run-engine.mjs";
 import { readJson } from "./store.mjs";
 
 // Status/doctor commands are operator-facing helpers.
@@ -17,12 +18,14 @@ export async function getRuntimeStatus(rootDir, config = {}) {
   const benchmarkSummary = await readBenchmarkSummary(rootDir, config, metrics);
   const benchmarkCycleSummary = await readBenchmarkCycleSummary(rootDir, config);
   const tuningSummary = await readTuningSummary(rootDir, config);
+  const latestTaskRun = await readLatestTaskRunSummary(rootDir);
   const costSummary = buildCostSummary(queue, metrics);
   return {
     queue,
     worker: await getWorkerState(rootDir),
     metrics,
     costSummary,
+    latestTaskRun,
     benchmarkSummary,
     benchmarkCycleSummary,
     tuningSummary,
