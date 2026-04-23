@@ -173,6 +173,8 @@ assert.equal(queueAfterRun.queued, 0);
 const reviewReport = await readJson(queueAfterRun.jobs[0].reportPath, null);
 assert.equal(reviewReport.execution.adapter, "dry-run");
 assert.ok(reviewReport.execution.output.prompt.includes("Review mode: expensive"));
+assert.equal(reviewReport.job.status, queueAfterRun.jobs[0].status);
+assert.equal(reviewReport.job.execution.status, queueAfterRun.jobs[0].execution.status);
 
 const historyRaw = await fs.readFile(path.join(tempRoot, "state/reviews/history.jsonl"), "utf8");
 assert.ok(historyRaw.includes("\"adapter\":\"dry-run\""));
@@ -291,6 +293,8 @@ assert.equal(commandReport.execution.status, "completed");
 assert.equal(Array.isArray(commandReport.execution.output.parsed.operations), true);
 assert.equal(commandReport.execution.output.parsed.operations.length, 1);
 assert.equal(commandReport.noteChanges.applied.length, 1);
+assert.equal(commandReport.job.status, commandQueue.jobs[0].status);
+assert.equal(commandReport.job.execution.status, commandQueue.jobs[0].execution.status);
 
 const commandNotes = await loadNotes(commandAdapterRoot);
 const commandTouchedNote = commandNotes.find((note) => note.id === commandSync.touchedNoteId);
@@ -357,6 +361,8 @@ assert.equal(valueGateReport.execution.adapter, "value-policy");
 assert.equal(valueGateReport.execution.output.usage.totalTokens, 0);
 assert.equal(valueGateReport.valueGate.shouldSkip, true);
 assert.match(valueGateReport.noteChanges.reason, /value gate/i);
+assert.equal(valueGateReport.job.status, valueGateQueue.jobs[0].status);
+assert.equal(valueGateReport.job.valueGate.shouldSkip, true);
 
 const valueGateMetrics = await summarizeReviewMetrics(valueGateRoot);
 assert.equal(valueGateMetrics.counters.processedJobs, 1);
@@ -2064,6 +2070,8 @@ const staleReport = await readJson(staleRun.processed[0].reportPath, null);
 assert.equal(staleReport.staleness.level, "stale");
 assert.equal(staleReport.execution.adapter, "dry-run");
 assert.match(staleReport.execution.output.prompt, /Job staleness: stale/);
+assert.equal(staleReport.job.status, "completed");
+assert.equal(staleReport.job.execution.status, "prepared");
 
 const expiredCreatedAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
 await fs.writeFile(staleQueuePath, JSON.stringify([
