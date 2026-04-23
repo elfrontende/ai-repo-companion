@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readJson, writeJson } from "./store.mjs";
 import { roughTokenMatch } from "./note-parser.mjs";
+import { attachAgentContract } from "./agent-contract-engine.mjs";
 
 // The registry stores long-lived agent identities.
 // We reuse them across chats so future sessions do not need to rebuild
@@ -43,7 +44,9 @@ export async function planAgents(rootDir, taskProfile, systemConfig) {
     addAgentById(selected, updatedRegistry, agentId);
   }
 
-  const routedAgents = [...selected.values()].map((agent) => routeAgent(agent, taskProfile, systemConfig));
+  const routedAgents = [...selected.values()]
+    .map((agent) => routeAgent(agent, taskProfile, systemConfig))
+    .map((agent) => attachAgentContract(agent));
 
   return {
     taskProfile,

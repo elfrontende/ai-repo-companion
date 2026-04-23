@@ -17,6 +17,8 @@ export async function buildRuntimeReport(rootDir, config = {}) {
     generatedAt: new Date().toISOString(),
     compactSummary: buildCompactOperatorSummary(status, doctor),
     overview: buildOverview(status),
+    execution: buildExecution(status, doctor),
+    evaluation: buildEvaluation(status),
     economics: buildEconomics(status),
     controls: buildControls(status, doctor, tuning),
     evidence: buildEvidence(status, doctor, tuning)
@@ -44,6 +46,21 @@ function buildOverview(status) {
       running: status.queue.running,
       awaitingApproval: status.queue.awaitingApproval
     },
+    latestRun: {
+      available: status.latestTaskRun?.available === true,
+      id: status.latestTaskRun?.id ?? null,
+      status: status.latestTaskRun?.status ?? null,
+      currentStage: status.latestTaskRun?.currentStage ?? null,
+      task: status.latestTaskRun?.task ?? null,
+      reviewStatus: status.latestTaskRun?.reviewStatus ?? null,
+      multiAgentStatus: status.latestTaskRun?.multiAgentStatus ?? null,
+      currentPhase: status.latestTaskRun?.currentPhase ?? null,
+      finalVerdict: status.latestTaskRun?.finalVerdict ?? null,
+      agentRunCount: status.latestTaskRun?.agentRunCount ?? 0,
+      handoffCount: status.latestTaskRun?.handoffCount ?? 0,
+      verdictCount: status.latestTaskRun?.verdictCount ?? 0,
+      retryCount: status.latestTaskRun?.retryCount ?? 0
+    },
     liveTokensUsed: status.costSummary.liveTokensUsed,
     avgTokensPerRun: status.costSummary.avgTokensPerRun,
     canaryStatus: status.tuningSummary.canaryStatus ?? "none",
@@ -58,8 +75,74 @@ function buildCompactOperatorSummary(status, doctor) {
   return {
     healthLine: status.compactSummary.health,
     economicsLine: status.compactSummary.whyExpensive,
-    controlsLine: status.compactSummary.whyTuneNow,
+    controlsLine: status.latestRunSurface?.available
+      ? `Latest run ${status.latestRunSurface.run.multiAgentStatus} in ${status.latestRunSurface.run.currentPhase ?? "n/a"} with ${status.latestRunSurface.verdicts.blocking} blocking verdict(s).`
+      : status.compactSummary.whyTuneNow,
     evidenceLine: doctor.compactSummary.topFinding
+  };
+}
+
+function buildExecution(status, doctor) {
+  const surface = status.latestRunSurface ?? { available: false };
+  return {
+    available: surface.available === true,
+    latestRun: surface.available
+      ? {
+        id: surface.run.id,
+        task: surface.run.task,
+        status: surface.run.status,
+        multiAgentStatus: surface.run.multiAgentStatus,
+        rolloutMode: surface.run.rolloutMode,
+        currentPhase: surface.run.currentPhase,
+        finalVerdict: surface.run.finalVerdict?.status ?? null
+      }
+      : null,
+    agentRuns: surface.available
+      ? {
+        total: surface.agentRuns.total,
+        active: surface.agentRuns.active,
+        completed: surface.agentRuns.completed,
+        failed: surface.agentRuns.failed,
+        latest: surface.agentRuns.items.slice(-3)
+      }
+      : { total: 0, active: 0, completed: 0, failed: 0, latest: [] },
+    handoffs: surface.available
+      ? {
+        total: surface.handoffs.total,
+        pending: surface.handoffs.pending,
+        consultations: surface.handoffs.consultations,
+        latest: surface.handoffs.items.slice(-3)
+      }
+      : { total: 0, pending: 0, consultations: 0, latest: [] },
+    verdicts: surface.available
+      ? {
+        total: surface.verdicts.total,
+        blocking: surface.verdicts.blocking,
+        latest: surface.verdicts.latest,
+        items: surface.verdicts.items
+      }
+      : { total: 0, blocking: 0, latest: null, items: [] },
+    retries: surface.available
+      ? {
+        total: surface.retries.total,
+        open: surface.retries.open,
+        completed: surface.retries.completed,
+        exhausted: surface.retries.exhausted,
+        items: surface.retries.items
+      }
+      : { total: 0, open: 0, completed: 0, exhausted: 0, items: [] },
+    blockingReason: doctor.findings.find((item) => ["agent-run-failed", "handoff-stalled", "needs-rework-without-retry", "retry-exhausted", "run-stage-stalled"].includes(item.code))?.message
+      ?? "No blocking multi-agent execution issue is active."
+  };
+}
+
+function buildEvaluation(status) {
+  return {
+    loaded: status.evaluationSummary?.loaded === true,
+    suite: status.evaluationSummary?.suite ?? null,
+    rolloutMode: status.evaluationSummary?.rolloutMode ?? null,
+    aggregate: status.evaluationSummary?.aggregate ?? null,
+    scenarios: status.evaluationSummary?.scenarios ?? []
   };
 }
 
@@ -115,9 +198,13 @@ function buildEvidence(status, doctor, tuning) {
   const multiCycle = status.benchmarkCycleSummary.multiCycle ?? {};
   return {
     benchmark: {
+      corpusMode: status.benchmarkSummary.corpusMode,
       cheapestVariant: status.benchmarkSummary.cheapestVariant,
       balancedReductionPercent: status.benchmarkSummary.balancedReductionPercent,
       saverReductionPercent: status.benchmarkSummary.saverReductionPercent,
+      realCorpusReductionPercent: status.benchmarkSummary.realCorpusCheck?.reductionPercent ?? null,
+      emptyContextTasks: status.benchmarkSummary.realCorpusCheck?.emptyContextTasks ?? 0,
+      fullCorpusTasks: status.benchmarkSummary.realCorpusCheck?.fullCorpusTasks ?? 0,
       confidence: buildConfidenceCard(status.benchmarkSummary.confidence),
       tuningOutcome: status.benchmarkSummary.tuningComparison?.outcome ?? null,
       tuningSummary: status.benchmarkSummary.tuningComparison?.summary ?? null
@@ -418,6 +505,11 @@ function renderRuntimeReportHtml(report) {
           <div class="muted">Queued: ${report.overview.queue.queued}, running: ${report.overview.queue.running}, approvals: ${report.overview.queue.awaitingApproval}</div>
         </article>
         <article class="card">
+          <div class="eyebrow">Latest Run</div>
+          <div class="metric">${escapeHtml(report.overview.latestRun.multiAgentStatus ?? report.overview.latestRun.status ?? "none")}</div>
+          <div class="muted">${escapeHtml(report.overview.latestRun.task ?? "No task run is available yet.")}</div>
+        </article>
+        <article class="card">
           <div class="eyebrow">Live Tokens</div>
           <div class="metric">${escapeHtml(String(report.overview.liveTokensUsed))}</div>
           <div class="muted">Average per run: ${escapeHtml(String(report.overview.avgTokensPerRun))}</div>
@@ -431,6 +523,60 @@ function renderRuntimeReportHtml(report) {
           <div class="eyebrow">Cycle Confidence</div>
           <div class="metric">${escapeHtml(report.overview.confidence.cycles.level)}</div>
           <div class="muted">${escapeHtml(report.overview.confidence.cycles.primaryReason)}</div>
+        </article>
+      </section>
+
+      <h2>Execution</h2>
+      <section class="grid">
+        <article class="card">
+          <div class="eyebrow">Run State</div>
+          <div class="metric">${escapeHtml(report.execution.latestRun?.multiAgentStatus ?? "none")}</div>
+          <div class="muted">Phase: ${escapeHtml(report.execution.latestRun?.currentPhase ?? "n/a")} · Verdict: ${escapeHtml(report.execution.latestRun?.finalVerdict ?? "n/a")}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Agent Runs</div>
+          <div class="metric">${escapeHtml(String(report.execution.agentRuns.total))}</div>
+          <div class="muted">Active: ${report.execution.agentRuns.active}, completed: ${report.execution.agentRuns.completed}, failed: ${report.execution.agentRuns.failed}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Handoffs</div>
+          <div class="metric">${escapeHtml(String(report.execution.handoffs.total))}</div>
+          <div class="muted">Pending: ${report.execution.handoffs.pending}, consultations: ${report.execution.handoffs.consultations}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Retries</div>
+          <div class="metric">${escapeHtml(String(report.execution.retries.total))}</div>
+          <div class="muted">Open: ${report.execution.retries.open}, completed: ${report.execution.retries.completed}, exhausted: ${report.execution.retries.exhausted}</div>
+        </article>
+      </section>
+
+      <section class="grid">
+        ${renderListCard(
+          "Recent Verdicts",
+          report.execution.verdicts.items.map((item) => `<strong>${escapeHtml(item.status)}</strong> — ${escapeHtml(item.summary)}`)
+        )}
+        ${renderListCard(
+          "Recent Handoffs",
+          report.execution.handoffs.latest.map((item) => `<strong>${escapeHtml(item.toPhase)}</strong> → ${escapeHtml(item.toAgentId)} (${escapeHtml(item.status)})`)
+        )}
+      </section>
+
+      <h2>Evaluation</h2>
+      <section class="grid">
+        <article class="card">
+          <div class="eyebrow">Evaluation Suite</div>
+          <div class="metric">${escapeHtml(report.evaluation.loaded ? report.evaluation.suite : "none")}</div>
+          <div class="muted">${escapeHtml(report.evaluation.loaded ? `Rollout mode: ${report.evaluation.rolloutMode}` : "No multi-agent evaluation report is available yet.")}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Coverage Delta</div>
+          <div class="metric">${escapeHtml(String(report.evaluation.aggregate?.averageCoverageDelta ?? 0))}</div>
+          <div class="muted">Average agent-run delta: ${escapeHtml(String(report.evaluation.aggregate?.averageAgentRunDelta ?? 0))}</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Reworked Scenarios</div>
+          <div class="metric">${escapeHtml(String(report.evaluation.aggregate?.reworkedScenarios ?? 0))}</div>
+          <div class="muted">Blocked scenarios: ${escapeHtml(String(report.evaluation.aggregate?.blockedScenarios ?? 0))}</div>
         </article>
       </section>
 

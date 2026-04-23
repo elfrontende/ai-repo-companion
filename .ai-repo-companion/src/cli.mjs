@@ -16,6 +16,9 @@ import { getRuntimeStatus, runRuntimeDoctor } from "./lib/runtime-status-engine.
 import { buildRuntimeReport, writeRuntimeReportHtml } from "./lib/runtime-report-engine.mjs";
 import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "./lib/benchmark-engine.mjs";
 import { applyReviewCostMode } from "./lib/review-cost-mode-engine.mjs";
+import { readTaskRunSurface } from "./lib/run-engine.mjs";
+import { runMultiAgentEvaluation } from "./lib/multi-agent-eval-engine.mjs";
+import { writeHostIntegrationPack } from "./lib/host-integration-engine.mjs";
 
 // The CLI is intentionally thin.
 // It is mostly argument parsing plus command routing into the lib/ modules.
@@ -74,8 +77,14 @@ switch (command) {
   case "report":
     output(await runReport());
     break;
+  case "run":
+    output(await runRun(args));
+    break;
   case "benchmark":
     output(await runBenchmark(args));
+    break;
+  case "evaluate":
+    output(await runEvaluate(args));
     break;
   case "metrics":
     output(await runMetrics());
@@ -95,6 +104,9 @@ switch (command) {
   case "demo":
     await requireTask(args);
     output(await runDemo(args));
+    break;
+  case "integrate":
+    output(await runIntegrate(args));
     break;
   default:
     output(helpText(), false);
@@ -203,9 +215,18 @@ async function runReport() {
   };
 }
 
+async function runRun(args) {
+  return {
+    rootDir,
+    mode: "run",
+    run: await readTaskRunSurface(rootDir, args.runId ?? "latest")
+  };
+}
+
 async function runBenchmark(args = {}) {
   const iterations = Math.max(1, Number(args.iterations) || 1);
   const suite = args.suite ?? "mixed";
+  const corpusMode = args.corpus ?? args.corpusMode ?? "real";
   return {
     rootDir,
     mode: "benchmark",
@@ -213,9 +234,10 @@ async function runBenchmark(args = {}) {
       ? await runSyntheticBenchmarkCycle(rootDir, {
         iterations,
         autoTuneBetweenRuns: args.autoTuneBetweenRuns === true,
-        suite
+        suite,
+        corpusMode
       })
-      : await runSyntheticBenchmark(rootDir, systemConfig, { suite })
+      : await runSyntheticBenchmark(rootDir, systemConfig, { suite, corpusMode })
   };
 }
 
@@ -224,6 +246,33 @@ async function runMetrics() {
     rootDir,
     mode: "metrics",
     metrics: await summarizeReviewMetrics(rootDir)
+  };
+}
+
+async function runEvaluate(args) {
+  const runtimeConfig = buildRuntimeAgentConfig(systemConfig, args);
+  return {
+    rootDir,
+    mode: "evaluate",
+    evaluation: await runMultiAgentEvaluation(rootDir, runtimeConfig, {
+      suite: args.suite,
+      rolloutMode: args.rolloutMode
+    }),
+    runtimeAgentConfig: describeRuntimeAgentConfig(runtimeConfig)
+  };
+}
+
+async function runIntegrate(args) {
+  const runtimeConfig = buildRuntimeAgentConfig(systemConfig, args);
+  return {
+    rootDir,
+    mode: "integrate",
+    integration: await writeHostIntegrationPack(rootDir, runtimeConfig, {
+      editor: args.editor,
+      hostRoot: args.hostRoot,
+      writeHostFiles: args.writeHostFiles === true
+    }),
+    runtimeAgentConfig: describeRuntimeAgentConfig(runtimeConfig)
   };
 }
 
@@ -242,20 +291,21 @@ async function runTune(args) {
 }
 
 async function runTask(args) {
-  const reviewConfig = buildRuntimeReviewConfig(systemConfig, args);
+  const runtimeConfig = buildRuntimeAgentConfig(buildRuntimeReviewConfig(systemConfig, args), args);
 
   return {
     rootDir,
     mode: "task",
-    flow: await runTaskFlow(rootDir, systemConfig, {
+    flow: await runTaskFlow(rootDir, runtimeConfig, {
       task: args.task,
       summary: args.summary,
       artifacts: splitCsv(args.artifacts),
       budget: args.budget,
       reviewNow: args.reviewNow,
-      reviewConfig
+      reviewConfig: runtimeConfig
     }),
-    runtimeReviewConfig: describeRuntimeReviewConfig(reviewConfig)
+    runtimeReviewConfig: describeRuntimeReviewConfig(runtimeConfig),
+    runtimeAgentConfig: describeRuntimeAgentConfig(runtimeConfig)
   };
 }
 
@@ -373,19 +423,33 @@ function helpText() {
       "node src/cli.mjs sync --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\"",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --artifacts \"cli,tests,notes\" --reviewNow --live",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive --agentModel gpt-5.4",
       "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --reviewNow --live --costMode saver",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive --agentProvider codex",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive --agentProvider cursor",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive --agentProvider cursor --agentMode ask",
+      "node src/cli.mjs task --task \"design a token-efficient memory system\" --summary \"Captured retrieval rules\" --agentLive --agentProvider external --agentCommandProvider external",
       "node src/cli.mjs review --jobId memjob-123 --live --costMode strict --reviewProfile heavy",
       "node src/cli.mjs task --task \"capture auth rollout learnings\" --summary \"Collapsed duplicate auth notes\" --artifacts \"notes,worker\" --reviewNow --live --provider cursor",
+      "node src/cli.mjs integrate --editor both",
+      "node src/cli.mjs integrate --editor both --hostRoot .. --writeHostFiles",
       "node src/cli.mjs queue",
       "node src/cli.mjs status",
       "node src/cli.mjs doctor",
       "node src/cli.mjs report",
+      "node src/cli.mjs run --runId latest",
       "node src/cli.mjs report --format html",
       "node src/cli.mjs report --format html --output ./runtime-report.html",
       "node src/cli.mjs benchmark",
+      "node src/cli.mjs benchmark --corpus real",
+      "node src/cli.mjs benchmark --corpus synthetic-noise",
       "node src/cli.mjs benchmark --suite low-risk",
       "node src/cli.mjs benchmark --suite high-risk",
       "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",
+      "node src/cli.mjs evaluate",
+      "node src/cli.mjs evaluate --agentLive --suite high-risk",
+      "node src/cli.mjs evaluate --suite high-risk",
       "node src/cli.mjs metrics",
       "node src/cli.mjs tune",
       "node src/cli.mjs tune --phase cheap-domains",
@@ -452,6 +516,125 @@ function buildRuntimeReviewConfig(baseConfig, args) {
 
   config.reviewExecution = execution;
   return config;
+}
+
+function buildRuntimeAgentConfig(baseConfig, args) {
+  const config = structuredClone(baseConfig);
+  config.multiAgentRuntime = {
+    ...(config.multiAgentRuntime ?? {})
+  };
+  config.multiAgentRuntime.providerByAgentProvider = {
+    ...(config.multiAgentRuntime.providerByAgentProvider ?? {})
+  };
+  config.multiAgentRuntime.commandAdapters = {
+    ...(config.multiAgentRuntime.commandAdapters ?? {})
+  };
+  config.multiAgentRuntime.nativeCodex = {
+    ...(config.multiAgentRuntime.nativeCodex ?? {})
+  };
+  config.multiAgentRuntime.nativeCursor = {
+    ...(config.multiAgentRuntime.nativeCursor ?? {})
+  };
+
+  if (args.agentAdapter) {
+    config.multiAgentRuntime.defaultAdapter = args.agentAdapter;
+  }
+
+  const requestedProvider = args.agentProvider && args.agentProvider !== true
+    ? args.agentProvider
+    : null;
+
+  if (requestedProvider === "codex" || requestedProvider === "cursor") {
+    pinAllAgentProviders(config, requestedProvider);
+  }
+
+  if (requestedProvider === "command" || requestedProvider === "external") {
+    config.multiAgentRuntime.liveProvider = args.agentCommandProvider ?? "external";
+    pinAllAgentProviders(config, config.multiAgentRuntime.liveProvider);
+  }
+
+  if (!args.agentLive) {
+    return config;
+  }
+
+  const liveProvider = requestedProvider
+    ?? config.multiAgentRuntime.liveProvider
+    ?? "codex";
+
+  if (!args.agentAdapter) {
+    config.multiAgentRuntime.defaultAdapter = liveProvider === "command" || liveProvider === "external"
+      ? "command"
+      : "provider-runtime";
+  }
+
+  config.multiAgentRuntime.nativeCodex.enabled = false;
+  config.multiAgentRuntime.nativeCursor.enabled = false;
+
+  if (liveProvider === "codex") {
+    config.multiAgentRuntime.liveProvider = "codex";
+    config.multiAgentRuntime.nativeCodex = {
+      ...(config.multiAgentRuntime.nativeCodex ?? {}),
+      enabled: true
+    };
+    if (args.agentModel) {
+      config.multiAgentRuntime.nativeCodex.model = args.agentModel;
+    }
+    if (args.agentSandbox) {
+      config.multiAgentRuntime.nativeCodex.sandbox = args.agentSandbox;
+    }
+    if (args.agentBinary) {
+      config.multiAgentRuntime.nativeCodex.binary = args.agentBinary;
+    }
+  }
+
+  if (liveProvider === "cursor") {
+    config.multiAgentRuntime.liveProvider = "cursor";
+    config.multiAgentRuntime.nativeCursor = {
+      ...(config.multiAgentRuntime.nativeCursor ?? {}),
+      enabled: true
+    };
+    if (args.agentModel) {
+      config.multiAgentRuntime.nativeCursor.model = args.agentModel;
+    }
+    if (args.agentSandbox) {
+      config.multiAgentRuntime.nativeCursor.sandbox = args.agentSandbox;
+    }
+    if (args.agentBinary) {
+      config.multiAgentRuntime.nativeCursor.binary = args.agentBinary;
+    }
+    if (args.agentMode) {
+      config.multiAgentRuntime.nativeCursor.mode = args.agentMode;
+    }
+  }
+
+  if (liveProvider === "command" || liveProvider === "external") {
+    const commandProvider = args.agentCommandProvider ?? config.multiAgentRuntime.liveProvider ?? "external";
+    config.multiAgentRuntime.liveProvider = commandProvider;
+    config.multiAgentRuntime.defaultAdapter = "command";
+    pinAllAgentProviders(config, commandProvider);
+    if (!config.multiAgentRuntime.commandAdapters[commandProvider]) {
+      config.multiAgentRuntime.commandAdapters[commandProvider] = {
+        enabled: false,
+        command: "",
+        args: []
+      };
+    }
+    config.multiAgentRuntime.commandAdapters[commandProvider].enabled = true;
+    if (args.agentBinary) {
+      config.multiAgentRuntime.commandAdapters[commandProvider].command = args.agentBinary;
+    }
+  }
+
+  return config;
+}
+
+function pinAllAgentProviders(config, provider) {
+  const providerKeys = Object.keys(config.providers ?? {});
+  config.multiAgentRuntime.liveProvider = provider;
+  config.multiAgentRuntime.providerByAgentProvider = {
+    default: provider,
+    ...Object.fromEntries(providerKeys.map((key) => [key, provider]))
+  };
 }
 
 function describeRuntimeReviewConfig(config) {
@@ -539,6 +722,49 @@ function describeRuntimeReviewConfig(config) {
     runtimeLock: {
       enabled: config.reviewExecution?.runtimeLock?.enabled !== false,
       maxAgeMinutes: config.reviewExecution?.runtimeLock?.maxAgeMinutes ?? 15
+    }
+  };
+}
+
+function describeRuntimeAgentConfig(config) {
+  return {
+    rolloutMode: config.multiAgentRuntime?.rolloutMode ?? "active",
+    defaultAdapter: config.multiAgentRuntime?.defaultAdapter ?? "local-contract",
+    liveProvider: config.multiAgentRuntime?.liveProvider ?? "codex",
+    maxReworkLoops: config.multiAgentRuntime?.maxReworkLoops ?? 2,
+    providerByAgentProvider: config.multiAgentRuntime?.providerByAgentProvider ?? {},
+    nativeCodex: {
+      enabled: config.multiAgentRuntime?.nativeCodex?.enabled ?? false,
+      binary: config.multiAgentRuntime?.nativeCodex?.binary ?? "codex",
+      model: config.multiAgentRuntime?.nativeCodex?.model ?? "",
+      sandbox: config.multiAgentRuntime?.nativeCodex?.sandbox ?? "workspace-write",
+      maxAttempts: config.multiAgentRuntime?.nativeCodex?.maxAttempts ?? 2,
+      retryBackoffMs: config.multiAgentRuntime?.nativeCodex?.retryBackoffMs ?? 1500
+    },
+    nativeCursor: {
+      enabled: config.multiAgentRuntime?.nativeCursor?.enabled ?? false,
+      binary: config.multiAgentRuntime?.nativeCursor?.binary ?? "cursor",
+      model: config.multiAgentRuntime?.nativeCursor?.model ?? "",
+      mode: config.multiAgentRuntime?.nativeCursor?.mode ?? "agent",
+      sandbox: config.multiAgentRuntime?.nativeCursor?.sandbox ?? "enabled",
+      trustWorkspace: config.multiAgentRuntime?.nativeCursor?.trustWorkspace !== false,
+      force: config.multiAgentRuntime?.nativeCursor?.force === true,
+      maxAttempts: config.multiAgentRuntime?.nativeCursor?.maxAttempts ?? 2,
+      retryBackoffMs: config.multiAgentRuntime?.nativeCursor?.retryBackoffMs ?? 1500
+    },
+    commandAdapters: Object.fromEntries(
+      Object.entries(config.multiAgentRuntime?.commandAdapters ?? {}).map(([key, value]) => [
+        key,
+        {
+          enabled: value?.enabled === true,
+          command: value?.command ?? "",
+          args: value?.args ?? []
+        }
+      ])
+    ),
+    integration: {
+      defaultEditor: config.multiAgentRuntime?.integration?.defaultEditor ?? "both",
+      packOutputDir: config.multiAgentRuntime?.integration?.packOutputDir ?? "state/integration/host-pack"
     }
   };
 }

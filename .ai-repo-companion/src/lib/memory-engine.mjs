@@ -1,7 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendLine, readJson, writeJson } from "./store.mjs";
-import { estimateTokens, formatFrontmatter, parseFrontmatter, roughTokenMatch, slugify, tokenize } from "./note-parser.mjs";
+import {
+  estimateTokens,
+  extractMeaningfulTaskTokens,
+  formatFrontmatter,
+  isCompanionTask,
+  parseFrontmatter,
+  roughTokenMatch,
+  slugify,
+  tokenize
+} from "./note-parser.mjs";
 import { loadNotes } from "./context-engine.mjs";
 
 export async function syncMemory(rootDir, payload, config) {
@@ -40,9 +49,13 @@ function findBestExistingNote(notes, task, summary) {
   // We do a cheap overlap test first because it is usually enough to decide
   // whether a task extends existing knowledge or deserves a brand-new note.
   const queryTokens = tokenize(`${task} ${summary}`);
+  const companionTask = isCompanionTask(queryTokens);
   let best = null;
 
   for (const note of notes) {
+    if (!companionTask && note.scope === "system") {
+      continue;
+    }
     const noteTokens = new Set(tokenize(`${note.title} ${note.tags.join(" ")} ${note.body}`));
     const overlap = queryTokens.filter((token) => [...noteTokens].some((candidate) => roughTokenMatch(token, candidate))).length;
     if (overlap < 3) {
@@ -61,6 +74,7 @@ async function updateExistingNote(note, payload, timestamp) {
   // That keeps the note history easy to inspect for a junior developer.
   const markdown = await fs.readFile(note.filePath, "utf8");
   const { meta, body } = parseFrontmatter(markdown);
+  const taskTags = buildTaskTags(payload);
   const updatedBody = [
     body.trim(),
     "",
@@ -71,7 +85,8 @@ async function updateExistingNote(note, payload, timestamp) {
 
   const updatedMeta = {
     ...meta,
-    tags: uniqueList([...(normalizeArray(meta.tags)), ...tokenize(payload.task).slice(0, 5)]),
+    scope: normalizeScope(meta.scope),
+    tags: uniqueList([...(normalizeArray(meta.tags)), ...taskTags]),
     links: normalizeArray(meta.links)
   };
 
@@ -82,13 +97,14 @@ async function updateExistingNote(note, payload, timestamp) {
 async function createTaskNote(rootDir, payload, timestamp) {
   // New notes are intentionally tiny: one summary plus a few signals.
   // Retrieval gets more efficient when notes stay small and specific.
-  const taskTokens = tokenize(payload.task);
+  const taskTokens = buildTaskTags(payload, 6);
   const id = `z-task-${timestamp.replace(/[-:.TZ]/g, "")}`;
   const title = payload.task.trim().slice(0, 80);
   const filePath = path.join(rootDir, "notes", `${id}-${slugify(title)}.md`);
   const meta = {
     id,
     title,
+    scope: "repo",
     kind: "task-learning",
     tags: uniqueList(["task", ...taskTokens.slice(0, 6)]),
     links: []
@@ -122,6 +138,7 @@ export async function rebuildLinks(notes) {
   for (const note of notes) {
     const candidates = notes
       .filter((candidate) => candidate.id !== note.id)
+      .filter((candidate) => canLinkNotes(note, candidate))
       .map((candidate) => ({
         id: candidate.id,
         score: linkScore(note, candidate)
@@ -135,7 +152,8 @@ export async function rebuildLinks(notes) {
     const { meta, body } = parseFrontmatter(markdown);
     const updatedMeta = {
       ...meta,
-      links: uniqueList(candidates)
+      scope: normalizeScope(meta.scope),
+      links: uniqueList([...(normalizeArray(meta.links)), ...candidates].filter((candidate) => candidate !== note.id))
     };
     await fs.writeFile(note.filePath, formatFrontmatter(updatedMeta, body), "utf8");
 
@@ -153,6 +171,15 @@ function linkScore(left, right) {
     (score, token) => score + (leftTokens.some((candidate) => roughTokenMatch(token, candidate)) ? 1 : 0),
     0
   );
+}
+
+function canLinkNotes(left, right) {
+  const leftScope = normalizeScope(left.scope);
+  const rightScope = normalizeScope(right.scope);
+  if (leftScope === rightScope) {
+    return true;
+  }
+  return leftScope !== "system" && rightScope !== "system";
 }
 
 async function refreshWorkingMemory(rootDir, noteId, eventId, config) {
@@ -182,4 +209,22 @@ function normalizeArray(value) {
     return [];
   }
   return Array.isArray(value) ? value : [value];
+}
+
+function normalizeScope(value) {
+  return value === "system" ? "system" : "repo";
+}
+
+function buildTaskTags(payload, limit = 5) {
+  const taskTokens = extractMeaningfulTaskTokens(payload.task ?? "", { limit });
+  if (taskTokens.length > 0) {
+    return taskTokens;
+  }
+
+  const summaryTokens = extractMeaningfulTaskTokens(payload.summary ?? "", { limit });
+  if (summaryTokens.length > 0) {
+    return summaryTokens;
+  }
+
+  return [];
 }

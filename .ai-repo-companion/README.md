@@ -227,7 +227,7 @@ Daily ergonomics are better now too:
 - `node src/cli.mjs doctor` runs a local diagnostic pass for missing approval files, stale locks, report mismatches, and recovery leftovers
 - `node src/cli.mjs report` collapses the most important parts of `status` and `doctor` into one compact operator report
 - `status` now also surfaces the latest benchmark summary and last auto-tune snapshot
-- `status` now also surfaces the latest benchmark-cycle summary, so long-run synthetic tuning drift is visible alongside the last single benchmark
+- `status` now also surfaces the latest benchmark-cycle summary, so long-run tuning drift is visible alongside the last single benchmark
 - `status` also includes domain diagnostics for low-risk domains, so you can see which domain is burning tokens and which one still has value-gate drift
 - `status` now also returns `nextActions`, a short prioritized list of the most useful local commands to run next
 - `status` also highlights `topWasteDomains` and `safeSavingsOpportunities`, so the operator can see where cheap-domain token burn is concentrated
@@ -251,9 +251,11 @@ Daily ergonomics are better now too:
 
 This is the operator-facing layer: fewer manual file inspections, more direct answers about whether the runtime looks healthy.
 
-Synthetic validation is built in too:
+Benchmark validation is built in too:
 
 - `node src/cli.mjs benchmark` runs a small local suite of tasks with mixed difficulty
+- `benchmark` now defaults to the real note corpus, so the main report reflects current repository reality before any synthetic stress is added
+- `node src/cli.mjs benchmark --corpus synthetic-noise` adds benchmark-only noise notes, so retrieval stress can still be tested separately from the default real-corpus report
 - benchmark also supports `--suite low-risk` and `--suite high-risk`, so cheap domains and risky domains can be validated separately without mixing their trend history
 - `node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns` runs a longer local canary loop, optionally auto-tuning between benchmark passes
 - each sample compares `saver`, `balanced`, and `strict` system variants against a naive `baseline` that always drags the full note set
@@ -264,7 +266,7 @@ Synthetic validation is built in too:
 - each benchmark report now also stores a `tuningComparison` block when a previous tune baseline exists, so the operator can see whether the latest benchmark actually improved or degraded after tuning
 - benchmark cycles also return a compact summary for first-vs-last economics, accepted canaries, and rollback counts across the loop
 - benchmark cycles now also persist their own report/history files and produce a short `multiCycle` summary, so several recent cycle runs can be compared instead of treating each loop as an isolated snapshot
-- benchmark trends, tuning comparisons, and cycle summaries now also include a small local `confidence` block, so the control plane can tell the difference between stable economic evidence and thin or noisy synthetic signal
+- benchmark trends, tuning comparisons, and cycle summaries now also include a small local `confidence` block, so the control plane can tell the difference between stable economic evidence and thin or noisy signal
 - `multiCycle` now also includes a small window-to-window comparison, so the control plane can tell whether the latest cycle window is truly improving over the previous one instead of only reporting a local streak
 - `multiCycle` now also keeps a short window-history trail and a `stableWindowDirection`, so long-run evidence can distinguish one lucky comparison from repeated improving or degrading windows
 - `multiCycle` now also keeps `recentWindowExtremes`, so long-run reports can show the best recent window, worst recent window, and their spread instead of only the latest comparison
@@ -532,3 +534,28 @@ This is intentionally simple:
 - file watchers or daemonized background workers
 
 The current scaffold is the orchestration and memory layer that those adapters can plug into later.
+
+## Host integration and blind deployment
+
+The runtime can now generate host-facing instructions for both Codex and Cursor.
+
+Generate a preview pack:
+
+```bash
+npm run integrate -- --editor both
+```
+
+Write host files directly into the parent repository:
+
+```bash
+npm run integrate -- --editor both --hostRoot .. --writeHostFiles
+```
+
+That pack includes:
+
+- `AGENTS.md` for Codex-aware hosts
+- `.cursor/rules/ai-repo-companion.mdc` with `alwaysApply: true` for Cursor
+- an install guide
+- a command adapter contract for non-native backends
+
+The full operating model lives in `docs/HOST-INTEGRATION.md`.

@@ -1,6 +1,7 @@
 ---
 id: z-120-agent-orchestration
 title: Agent orchestration and routing
+scope: system
 kind: architecture
 tags: agents,orchestration,routing,models,effort,агенти,оркестрація
 links: z-130-background-memory-sync,z-000-index,z-110-atomic-notes,z-100-context-minimization

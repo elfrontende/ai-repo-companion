@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { ensureWorkspace } from "../src/lib/bootstrap.mjs";
 import { readJson, writeJson } from "../src/lib/store.mjs";
 import { classifyTask } from "../src/lib/task-engine.mjs";
@@ -11,7 +13,6 @@ import { syncMemory } from "../src/lib/memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "../src/lib/policy-engine.mjs";
 import {
   applyReviewRetention,
-  approvePendingReview,
   inspectReviewQueue,
   planReviewNoteChanges,
   processReviewQueue
@@ -41,11 +42,19 @@ import { runSyntheticBenchmark, runSyntheticBenchmarkCycle } from "../src/lib/be
 import { executeReviewPayload } from "../src/lib/provider-engine.mjs";
 import { applyReviewCostMode } from "../src/lib/review-cost-mode-engine.mjs";
 import { assessReviewValueGate } from "../src/lib/review-value-gate-engine.mjs";
+import { readLatestTaskRunSummary, readTaskRun, readTaskRunSurface } from "../src/lib/run-engine.mjs";
+import { runMultiAgentEvaluation } from "../src/lib/multi-agent-eval-engine.mjs";
 
 // This file is intentionally broad instead of split into dozens of tiny test
 // files. The project behaves like one integrated runtime, so the smoke suite
 // focuses on "can the main loops still work together?" rather than only
 // micro-testing isolated helpers.
+
+const execFileAsync = promisify(execFile);
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const packageJson = await readJson(path.resolve("package.json"), {});
+assert.equal(packageJson.scripts?.approve, "node src/cli.mjs approve");
+assert.equal(packageJson.scripts?.integrate, "node src/cli.mjs integrate");
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -84,6 +93,20 @@ const memoryPolicy = await evaluateMemoryPolicy(tempRoot, taskProfile, config);
 assert.equal(memoryPolicy.mode, "expensive");
 assert.ok(memoryPolicy.shouldQueueReview);
 
+const flakyApiProfile = classifyTask("investigate flaky regression in API retries");
+assert.equal(flakyApiProfile.risk, "medium");
+assert.equal(flakyApiProfile.effort, "medium");
+assert.equal(flakyApiProfile.intents.includes("memory"), false);
+assert.equal(flakyApiProfile.intents[0], "verification");
+
+const authRolloutProfile = classifyTask("plan a safe auth migration rollout");
+assert.equal(authRolloutProfile.intents[0], "planning");
+assert.equal(authRolloutProfile.risk, "high");
+
+const ukrainianMigrationPlanProfile = classifyTask("спланувати безпечну міграцію auth схеми");
+assert.equal(ukrainianMigrationPlanProfile.intents[0], "planning");
+assert.equal(ukrainianMigrationPlanProfile.risk, "high");
+
 const notes = await loadNotes(tempRoot);
 const context = assembleContext("optimize context retrieval with atomic notes", notes, {
   tokenBudget: 500,
@@ -92,6 +115,13 @@ const context = assembleContext("optimize context retrieval with atomic notes", 
 
 assert.ok(context.selectedNotes.length > 0);
 assert.ok(context.usedTokens <= 500);
+
+const hostTaskContext = assembleContext("fix a typo and tighten wording in the deployment README", notes, {
+  tokenBudget: 500,
+  maxNotes: 4
+});
+
+assert.equal(hostTaskContext.selectedNotes.length, 0);
 
 const sync = await syncMemory(
   tempRoot,
@@ -114,6 +144,34 @@ const workingMemory = await readJson(path.join(tempRoot, "state/memory/working-m
 assert.ok(workingMemory.hotNoteIds.length >= 1);
 assert.ok(workingMemory.recentEventIds.length >= 1);
 
+const repoTaskRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-repo-task-"));
+await fs.cp(path.resolve("config"), path.join(repoTaskRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(repoTaskRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(repoTaskRoot, "state"), { recursive: true });
+await ensureWorkspace(repoTaskRoot);
+
+const originalIndexNote = await fs.readFile(path.join(repoTaskRoot, "notes/000-index.md"), "utf8");
+const repoTaskSync = await syncMemory(
+  repoTaskRoot,
+  {
+    task: "fix a typo and tighten wording in the deployment README",
+    summary: "Clarified deployment wording and removed repeated guidance.",
+    artifacts: ["docs"]
+  },
+  config
+);
+
+assert.match(repoTaskSync.touchedNoteId, /^z-task-/);
+const updatedIndexNote = await fs.readFile(path.join(repoTaskRoot, "notes/000-index.md"), "utf8");
+assert.equal(updatedIndexNote, originalIndexNote);
+const repoTaskNotes = await loadNotes(repoTaskRoot);
+const repoTaskContext = assembleContext("fix a typo and tighten wording in the deployment README", repoTaskNotes, {
+  tokenBudget: 500,
+  maxNotes: 4
+});
+assert.ok(repoTaskContext.selectedNotes.some((note) => note.id === repoTaskSync.touchedNoteId));
+assert.equal(repoTaskContext.selectedNotes.some((note) => note.scope === "system"), false);
+
 const reviewQueue = await readJson(path.join(tempRoot, "state/memory/review-queue.json"), []);
 assert.ok(reviewQueue.length >= 1);
 assert.equal(reviewQueue[0].mode, "expensive");
@@ -132,6 +190,8 @@ assert.equal(queueAfterRun.queued, 0);
 const reviewReport = await readJson(queueAfterRun.jobs[0].reportPath, null);
 assert.equal(reviewReport.execution.adapter, "dry-run");
 assert.ok(reviewReport.execution.output.prompt.includes("Review mode: expensive"));
+assert.equal(reviewReport.job.status, queueAfterRun.jobs[0].status);
+assert.equal(reviewReport.job.execution.status, queueAfterRun.jobs[0].execution.status);
 
 const historyRaw = await fs.readFile(path.join(tempRoot, "state/reviews/history.jsonl"), "utf8");
 assert.ok(historyRaw.includes("\"adapter\":\"dry-run\""));
@@ -142,6 +202,121 @@ assert.ok(firstMetrics.topAdapters.some((entry) => entry.key === "dry-run"));
 assert.ok(firstMetrics.cost.estimatedContextTokens > 0);
 assert.equal(firstMetrics.cost.liveTokensUsed, 0);
 assert.ok(firstMetrics.cost.avgEstimatedContextTokensPerRun > 0);
+
+const commandAdapterRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-command-adapter-"));
+await fs.cp(path.resolve("config"), path.join(commandAdapterRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(commandAdapterRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(commandAdapterRoot, "state"), { recursive: true });
+await ensureWorkspace(commandAdapterRoot);
+
+const commandAdapterScriptPath = path.join(commandAdapterRoot, "mock-review-provider.mjs");
+await fs.writeFile(commandAdapterScriptPath, [
+  "let raw = '';",
+  "process.stdin.setEncoding('utf8');",
+  "process.stdin.on('data', (chunk) => { raw += chunk; });",
+  "process.stdin.on('end', () => {",
+  "  const payload = JSON.parse(raw);",
+  "  const noteId = payload.contextBundle?.selectedNotes?.[0]?.id ?? '';",
+  "  const response = {",
+  "    summary: 'Synthetic command adapter output.',",
+  "    operations: [",
+  "      {",
+  "        type: 'append_note_update',",
+  "        noteId,",
+  "        sourceNoteId: '',",
+  "        targetNoteId: '',",
+  "        title: '',",
+  "        kind: '',",
+  "        summary: 'Command adapter normalized a queued review into a structured note update.',",
+  "        signals: [",
+  "          'Command adapter returned valid JSON',",
+  "          'Local pipeline parsed stdout into operations'",
+  "        ],",
+  "        tagsToAdd: ['command-adapter', 'structured-output'],",
+  "        linksToAdd: [],",
+  "        tags: [],",
+  "        links: []",
+  "      }",
+  "    ]",
+  "  };",
+  "  process.stdout.write(JSON.stringify(response));",
+  "});",
+  "process.stdin.resume();"
+].join("\n"), "utf8");
+
+const commandAdapterConfig = await readJson(path.join(commandAdapterRoot, "config/system.json"), {});
+for (const seedPayload of [
+  {
+    task: "refresh the README deployment section wording",
+    summary: "Tightened one deployment paragraph.",
+    artifacts: ["docs"]
+  },
+  {
+    task: "rewrite deployment guide wording for clarity",
+    summary: "Aligned terminology across the deployment guide.",
+    artifacts: ["docs"]
+  }
+]) {
+  const seedProfile = classifyTask(seedPayload.task);
+  const seedDecision = await evaluateMemoryPolicy(commandAdapterRoot, seedProfile, commandAdapterConfig);
+  const seedSync = await syncMemory(commandAdapterRoot, seedPayload, commandAdapterConfig);
+  await applyMemoryPolicyOutcome(commandAdapterRoot, seedDecision, seedProfile, seedSync, commandAdapterConfig);
+}
+
+const commandProfile = classifyTask("polish the deployment README wording and remove repeated guidance");
+const commandDecision = await evaluateMemoryPolicy(commandAdapterRoot, commandProfile, commandAdapterConfig);
+assert.equal(commandDecision.mode, "balanced");
+const commandSync = await syncMemory(
+  commandAdapterRoot,
+  {
+    task: "polish the deployment README wording and remove repeated guidance",
+    summary: "Collapsed duplicated phrasing in the deployment docs.",
+    artifacts: ["docs", "readme"]
+  },
+  commandAdapterConfig
+);
+const commandOutcome = await applyMemoryPolicyOutcome(commandAdapterRoot, commandDecision, commandProfile, commandSync, commandAdapterConfig);
+assert.ok(commandOutcome.queuedJob);
+
+const commandReviewRun = await processReviewQueue(commandAdapterRoot, commandAdapterConfig, {
+  maxJobs: 1,
+  reviewConfig: {
+    ...commandAdapterConfig,
+    reviewExecution: {
+      ...commandAdapterConfig.reviewExecution,
+      valueGate: {
+        ...(commandAdapterConfig.reviewExecution?.valueGate ?? {}),
+        minScore: 1
+      },
+      commandAdapters: {
+        ...(commandAdapterConfig.reviewExecution?.commandAdapters ?? {}),
+        cursor: {
+          enabled: true,
+          command: "node",
+          args: [commandAdapterScriptPath]
+        }
+      }
+    }
+  }
+});
+
+assert.equal(commandReviewRun.processedCount, 1);
+assert.equal(commandReviewRun.processed[0].adapter, "command");
+const commandQueue = await inspectReviewQueue(commandAdapterRoot);
+assert.equal(commandQueue.completed, 1);
+const commandReport = await readJson(commandQueue.jobs[0].reportPath, null);
+assert.equal(commandReport.execution.adapter, "command");
+assert.equal(commandReport.execution.status, "completed");
+assert.equal(Array.isArray(commandReport.execution.output.parsed.operations), true);
+assert.equal(commandReport.execution.output.parsed.operations.length, 1);
+assert.equal(commandReport.noteChanges.applied.length, 1);
+assert.equal(commandReport.job.status, commandQueue.jobs[0].status);
+assert.equal(commandReport.job.execution.status, commandQueue.jobs[0].execution.status);
+
+const commandNotes = await loadNotes(commandAdapterRoot);
+const commandTouchedNote = commandNotes.find((note) => note.id === commandSync.touchedNoteId);
+assert.ok(commandTouchedNote.body.includes("Review Update"));
+assert.ok(commandTouchedNote.tags.includes("command-adapter"));
 
 const valueGateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-value-gate-"));
 await fs.cp(path.resolve("config"), path.join(valueGateRoot, "config"), { recursive: true });
@@ -203,6 +378,8 @@ assert.equal(valueGateReport.execution.adapter, "value-policy");
 assert.equal(valueGateReport.execution.output.usage.totalTokens, 0);
 assert.equal(valueGateReport.valueGate.shouldSkip, true);
 assert.match(valueGateReport.noteChanges.reason, /value gate/i);
+assert.equal(valueGateReport.job.status, valueGateQueue.jobs[0].status);
+assert.equal(valueGateReport.job.valueGate.shouldSkip, true);
 
 const valueGateMetrics = await summarizeReviewMetrics(valueGateRoot);
 assert.equal(valueGateMetrics.counters.processedJobs, 1);
@@ -432,8 +609,20 @@ assert.equal(approvalQueueBeforeApply.awaitingApproval, 1);
 
 const approvalNotePath = path.join(approvalRoot, "notes/130-background-memory-sync.md");
 const approvalBefore = await fs.readFile(approvalNotePath, "utf8");
-const approvalResult = await approvePendingReview(approvalRoot, approvalJob.id, approvalConfig);
-assert.equal(approvalResult.status, "approved");
+const approvalCli = await execFileAsync(
+  npmCommand,
+  ["run", "--silent", "approve", "--", "--jobId", approvalJob.id],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: approvalRoot
+    }
+  }
+);
+const approvalResult = JSON.parse(approvalCli.stdout);
+assert.equal(approvalResult.mode, "approve");
+assert.equal(approvalResult.result.status, "approved");
 
 const approvalAfter = await fs.readFile(approvalNotePath, "utf8");
 assert.notEqual(approvalAfter, approvalBefore);
@@ -1651,6 +1840,7 @@ const htmlReport = await writeRuntimeReportHtml(statusRoot, statusConfig, path.j
 const htmlPayload = await fs.readFile(htmlReport.outputPath, "utf8");
 assert.match(htmlPayload, /<title>AI Repo Companion Runtime Report<\/title>/i);
 assert.match(htmlPayload, /Runtime Report/i);
+assert.match(htmlPayload, /Execution/i);
 assert.match(htmlPayload, /Before \/ After/i);
 
 const saverCostConfig = applyReviewCostMode(await readJson(path.join(statusRoot, "config/system.json"), {}), {
@@ -1746,17 +1936,21 @@ await writeJson(path.join(benchmarkRoot, "state/tuning/last-tuning.json"), {
 
 let benchmarkResult;
 for (let index = 0; index < 4; index += 1) {
-  benchmarkResult = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig);
+  benchmarkResult = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { corpusMode: "synthetic-noise" });
 }
 assert.equal(benchmarkResult.report.tasks.length, 5);
 assert.ok(benchmarkResult.report.aggregate.tokensSaved > 0);
 assert.ok(benchmarkResult.report.tasks.some((task) => task.savings.tokensSaved > 0));
+assert.equal(benchmarkResult.report.corpusMode, "synthetic-noise");
+assert.ok(benchmarkResult.report.inputCorpus.noiseNotesAdded > 0);
+assert.ok(benchmarkResult.report.realCorpusCheck.taskCount > 0);
 assert.equal(benchmarkResult.report.aggregate.cheapestVariant, "saver");
 assert.ok(benchmarkResult.report.aggregate.byVariant.saver.totalTokens <= benchmarkResult.report.aggregate.byVariant.strict.totalTokens);
 assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.saver));
 assert.ok(benchmarkResult.report.tasks.every((task) => task.variants.strict));
 const benchmarkReport = await readJson(path.join(benchmarkRoot, "state/benchmarks/last-benchmark.json"), null);
 assert.equal(benchmarkReport.aggregate.taskCount, 5);
+assert.equal(benchmarkReport.corpusMode, "synthetic-noise");
 assert.ok(benchmarkReport.aggregate.byVariant.balanced.totalTokens > 0);
 assert.equal(benchmarkReport.aggregate.byDomain.docs.cheapestVariant, "saver");
 assert.ok(benchmarkReport.aggregate.byDomain.deploy.byVariant.saver.totalTokens > 0);
@@ -1777,14 +1971,21 @@ assert.equal(benchmarkReport.tuningComparison.byDomain.docs.outcome, "improved")
 const benchmarkHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history.jsonl"), "utf8");
 assert.equal(benchmarkHistory.trim().split("\n").length, 3);
 
-const lowRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "low-risk" });
+const realCorpusBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { corpusMode: "real" });
+assert.equal(realCorpusBenchmark.report.corpusMode, "real");
+assert.equal(realCorpusBenchmark.report.inputCorpus.noiseNotesAdded, 0);
+assert.ok(realCorpusBenchmark.report.realCorpusCheck.noteCount > 0);
+assert.ok(realCorpusBenchmark.report.realCorpusCheck.taskCount > 0);
+assert.ok(realCorpusBenchmark.report.realCorpusCheck.emptyContextTasks >= 0);
+
+const lowRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "low-risk", corpusMode: "synthetic-noise" });
 assert.equal(lowRiskBenchmark.report.suite, "low-risk");
 assert.equal(lowRiskBenchmark.report.aggregate.taskCount, 4);
 assert.equal(lowRiskBenchmark.report.tuningComparison.available, false);
 const lowRiskHistory = await fs.readFile(path.join(benchmarkRoot, "state/benchmarks/history-low-risk.jsonl"), "utf8");
 assert.ok(lowRiskHistory.trim().split("\n").length >= 1);
 
-const highRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "high-risk" });
+const highRiskBenchmark = await runSyntheticBenchmark(benchmarkRoot, benchmarkConfig, { suite: "high-risk", corpusMode: "synthetic-noise" });
 assert.equal(highRiskBenchmark.report.suite, "high-risk");
 assert.equal(highRiskBenchmark.report.aggregate.taskCount, 3);
 assert.equal(highRiskBenchmark.report.tasks.every((task) => ["security", "migration", "architecture"].includes(task.domain)), true);
@@ -1815,9 +2016,11 @@ await fs.writeFile(
 const benchmarkCycle = await runSyntheticBenchmarkCycle(benchmarkCycleRoot, {
   iterations: 3,
   autoTuneBetweenRuns: true,
-  suite: "low-risk"
+  suite: "low-risk",
+  corpusMode: "synthetic-noise"
 });
 assert.equal(benchmarkCycle.suite, "low-risk");
+assert.equal(benchmarkCycle.corpusMode, "synthetic-noise");
 assert.equal(benchmarkCycle.benchmarks.length, 3);
 assert.equal(benchmarkCycle.tuningRuns.length, 2);
 assert.ok(["improved", "flat", "degraded"].includes(benchmarkCycle.summary.outcome));
@@ -1835,6 +2038,7 @@ assert.ok(["improving", "degrading", "flat"].includes(benchmarkCycle.multiCycle.
 assert.ok(["low", "medium", "high"].includes(benchmarkCycle.multiCycle.confidence.level));
 const storedCycleReport = await readJson(path.join(benchmarkCycleRoot, "state/benchmarks/last-benchmark-cycle-low-risk.json"), null);
 assert.equal(storedCycleReport.suite, "low-risk");
+assert.equal(storedCycleReport.corpusMode, "synthetic-noise");
 assert.equal(storedCycleReport.multiCycle.available, true);
 const storedCycleHistory = await fs.readFile(path.join(benchmarkCycleRoot, "state/benchmarks/history-cycle-low-risk.jsonl"), "utf8");
 assert.equal(storedCycleHistory.trim().split("\n").length, 4);
@@ -1884,6 +2088,8 @@ const staleReport = await readJson(staleRun.processed[0].reportPath, null);
 assert.equal(staleReport.staleness.level, "stale");
 assert.equal(staleReport.execution.adapter, "dry-run");
 assert.match(staleReport.execution.output.prompt, /Job staleness: stale/);
+assert.equal(staleReport.job.status, "completed");
+assert.equal(staleReport.job.execution.status, "prepared");
 
 const expiredCreatedAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
 await fs.writeFile(staleQueuePath, JSON.stringify([
@@ -2293,6 +2499,408 @@ assert.equal(taskFlowResult.review.status, "processed");
 assert.equal(taskFlowResult.review.result.processedCount, 1);
 assert.equal(taskFlowResult.review.result.processed[0].adapter, "dry-run");
 assert.equal(taskFlowResult.policyOutcome.queuedJob.id, taskFlowResult.review.queuedJobId);
+assert.ok(taskFlowResult.run.id.startsWith("run-"));
+assert.equal(taskFlowResult.run.status, "completed");
+const storedTaskRun = await readTaskRun(tempRoot, taskFlowResult.run.id);
+assert.equal(storedTaskRun.status, "completed");
+assert.equal(storedTaskRun.task, "document a medium-risk auth review handoff");
+assert.equal(storedTaskRun.review.queuedJobId, taskFlowResult.review.queuedJobId);
+assert.equal(storedTaskRun.plan.agents.some((agent) => agent.id === "orchestrator"), true);
+assert.ok(storedTaskRun.plan.agents.length >= 2);
+const latestTaskRunSummary = await readLatestTaskRunSummary(tempRoot);
+assert.equal(latestTaskRunSummary.available, true);
+assert.equal(latestTaskRunSummary.id, taskFlowResult.run.id);
+assert.equal(latestTaskRunSummary.reviewStatus, "processed");
+assert.ok(latestTaskRunSummary.agentRunCount >= 4);
+assert.ok(latestTaskRunSummary.handoffCount >= 1);
+const latestRunSurface = await readTaskRunSurface(tempRoot, taskFlowResult.run.id);
+assert.equal(latestRunSurface.available, true);
+assert.equal(latestRunSurface.run.id, taskFlowResult.run.id);
+assert.ok(latestRunSurface.agentRuns.total >= 4);
+assert.ok(latestRunSurface.handoffs.total >= 1);
+assert.ok(latestRunSurface.verdicts.total >= 1);
+assert.ok(["completed", "blocked", "needs-rework", "advisory"].includes(latestRunSurface.run.multiAgentStatus));
+const taskFlowRuntimeStatus = await getRuntimeStatus(tempRoot, config);
+assert.equal(taskFlowRuntimeStatus.latestTaskRun.available, true);
+assert.equal(taskFlowRuntimeStatus.latestTaskRun.id, taskFlowResult.run.id);
+assert.equal(taskFlowRuntimeStatus.latestRunSurface.available, true);
+assert.equal(taskFlowRuntimeStatus.latestRunSurface.run.id, taskFlowResult.run.id);
+const taskFlowRuntimeReport = await buildRuntimeReport(tempRoot, config);
+assert.equal(taskFlowRuntimeReport.overview.latestRun.available, true);
+assert.equal(taskFlowRuntimeReport.overview.latestRun.id, taskFlowResult.run.id);
+assert.equal(taskFlowRuntimeReport.execution.available, true);
+assert.ok(taskFlowRuntimeReport.execution.agentRuns.total >= 4);
+
+const runCli = await execFileAsync(
+  "node",
+  ["src/cli.mjs", "run", "--runId", "latest"],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: tempRoot
+    }
+  }
+);
+const runCliPayload = JSON.parse(runCli.stdout);
+assert.equal(runCliPayload.mode, "run");
+assert.equal(runCliPayload.run.available, true);
+assert.equal(runCliPayload.run.run.id, taskFlowResult.run.id);
+
+const evalResult = await runMultiAgentEvaluation(tempRoot, config, {});
+assert.equal(evalResult.report.scenarioCount, 3);
+assert.ok(evalResult.report.aggregate.averageCoverageDelta > 0);
+const taskEvalStatus = await getRuntimeStatus(tempRoot, config);
+assert.equal(taskEvalStatus.evaluationSummary.loaded, true);
+const taskEvalReport = await buildRuntimeReport(tempRoot, config);
+assert.equal(taskEvalReport.evaluation.loaded, true);
+
+const agentCodexRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-codex-"));
+await fs.cp(path.resolve("config"), path.join(agentCodexRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(agentCodexRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(agentCodexRoot, "state"), { recursive: true });
+await ensureWorkspace(agentCodexRoot);
+
+const agentCodexStubPath = path.join(agentCodexRoot, "codex-agent-stub.mjs");
+await fs.writeFile(agentCodexStubPath, `#!/usr/bin/env node
+import fs from "node:fs/promises";
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", async () => {
+  const outputIndex = process.argv.indexOf("--output-last-message");
+  const outputPath = outputIndex >= 0 ? process.argv[outputIndex + 1] : "";
+  const phaseMatch = input.match(/Phase:\\s*(.+)/);
+  const agentMatch = input.match(/Agent:\\s*(.+)/);
+  const phase = phaseMatch ? phaseMatch[1].trim() : "delivery";
+  const agent = agentMatch ? agentMatch[1].trim() : "Agent";
+  const artifactByPhase = {
+    triage: { kind: "task-brief", title: "Codex task brief", summary: "Codex stub planned the run.", content: "- Prepared the task brief." },
+    planning: { kind: "acceptance-criteria", title: "Codex acceptance criteria", summary: "Codex stub clarified scope.", content: "- Clarified scope and acceptance criteria." },
+    design: { kind: "design-note", title: "Codex design note", summary: "Codex stub prepared a design note.", content: "- Captured the design boundaries." },
+    delivery: { kind: "change-plan", title: "Codex change plan", summary: "Codex stub prepared the delivery plan.", content: "- Prepared the implementation slice." },
+    verification: { kind: agent.includes("Security") ? "security-review" : "verification-report", title: "Codex verification", summary: "Codex stub verified the phase.", content: "- Verification and rollback guidance look sufficient." },
+    consolidation: { kind: "final-decision", title: "Codex final decision", summary: "Codex stub consolidated the run.", content: "- Consolidated the run for finalization." },
+    "memory-capture": { kind: "sync-brief", title: "Codex sync brief", summary: "Codex stub captured the memory sync brief.", content: "- Captured the durable run summary." }
+  };
+  const verdictStatus = phase === "verification" ? "pass" : "info";
+  const payload = {
+    summary: "Codex stub generated a structured agent step output.",
+    artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
+    handoffs: [],
+    consultations: [
+      {
+        to: "memory-curator",
+        question: "Confirm the durable memory boundary before the next phase.",
+        reason: "Synthetic valid consultation target."
+      },
+      {
+        to: "not-a-real-agent",
+        question: "Need extra context before proceeding.",
+        reason: "Synthetic invalid consultation target."
+      }
+    ],
+    verdict: {
+      status: verdictStatus,
+      summary: verdictStatus === "pass" ? "Codex stub passed the verification step." : "Codex stub completed the phase.",
+      findings: []
+    }
+  };
+  await fs.writeFile(outputPath, JSON.stringify(payload, null, 2), "utf8");
+  process.stdout.write("tokens used 42\\n");
+});
+process.stdin.resume();
+`, "utf8");
+await fs.chmod(agentCodexStubPath, 0o755);
+
+const agentCodexConfig = await readJson(path.join(agentCodexRoot, "config/system.json"), {});
+agentCodexConfig.multiAgentRuntime = {
+  ...(agentCodexConfig.multiAgentRuntime ?? {}),
+  defaultAdapter: "codex-native",
+  nativeCodex: {
+    ...(agentCodexConfig.multiAgentRuntime?.nativeCodex ?? {}),
+    enabled: true,
+    binary: agentCodexStubPath,
+    model: "stub-agent-model",
+    retryBackoffMs: 0
+  }
+};
+await writeJson(path.join(agentCodexRoot, "config/system.json"), agentCodexConfig);
+
+const agentCodexRun = await runTaskFlow(agentCodexRoot, agentCodexConfig, {
+  task: "tighten deployment README wording and remove repeated guidance",
+  summary: "Let the codex-backed multi-agent runtime process a routine docs task."
+});
+assert.equal(agentCodexRun.orchestration.rolloutMode, "active");
+const agentCodexSurface = await readTaskRunSurface(agentCodexRoot, agentCodexRun.run.id);
+assert.equal(agentCodexSurface.available, true);
+assert.ok(agentCodexSurface.agentRuns.total >= 4);
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.adapter === "codex-native"));
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.usageSummary.durationMs >= 0));
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.attempts.length >= 1));
+assert.ok(agentCodexSurface.handoffs.consultations >= 1);
+assert.equal(agentCodexSurface.handoffs.pending, 0);
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.normalization.consultationsDropped >= 1));
+
+const agentCodexCli = await execFileAsync(
+  "node",
+  ["src/cli.mjs", "task", "--task", "tighten deployment README wording and remove repeated guidance", "--summary", "Drive the agent runtime through the CLI.", "--agentLive"],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: agentCodexRoot
+    }
+  }
+);
+const agentCodexCliPayload = JSON.parse(agentCodexCli.stdout);
+assert.equal(agentCodexCliPayload.mode, "task");
+assert.equal(agentCodexCliPayload.runtimeAgentConfig.nativeCodex.enabled, true);
+assert.equal(agentCodexCliPayload.runtimeAgentConfig.defaultAdapter, "provider-runtime");
+
+const agentCursorRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-cursor-"));
+await fs.cp(path.resolve("config"), path.join(agentCursorRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(agentCursorRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(agentCursorRoot, "state"), { recursive: true });
+await ensureWorkspace(agentCursorRoot);
+
+const agentCursorStubPath = path.join(agentCursorRoot, "cursor-agent-stub.mjs");
+await fs.writeFile(agentCursorStubPath, `#!/usr/bin/env node
+const prompt = process.argv.at(-1) ?? "";
+const phaseMatch = prompt.match(/Phase:\\s*(.+)/);
+const agentMatch = prompt.match(/Agent:\\s*(.+)/);
+const phase = phaseMatch ? phaseMatch[1].trim() : "delivery";
+const agent = agentMatch ? agentMatch[1].trim() : "Agent";
+const artifactByPhase = {
+  triage: { kind: "task-brief", title: "Cursor task brief", summary: "Cursor stub planned the run.", content: "- Prepared the task brief.", data: {} },
+  planning: { kind: "acceptance-criteria", title: "Cursor acceptance criteria", summary: "Cursor stub clarified scope.", content: "- Clarified scope and acceptance criteria.", data: {} },
+  design: { kind: "design-note", title: "Cursor design note", summary: "Cursor stub prepared a design note.", content: "- Captured the design boundaries.", data: {} },
+  delivery: { kind: "change-plan", title: "Cursor change plan", summary: "Cursor stub prepared the delivery plan.", content: "- Prepared the implementation slice.", data: {} },
+  verification: { kind: agent.includes("Security") ? "security-review" : "verification-report", title: "Cursor verification", summary: "Cursor stub verified the phase.", content: "- Verification and rollback guidance look sufficient.", data: {} },
+  consolidation: { kind: "final-decision", title: "Cursor final decision", summary: "Cursor stub consolidated the run.", content: "- Consolidated the run for finalization.", data: {} },
+  "memory-capture": { kind: "sync-brief", title: "Cursor sync brief", summary: "Cursor stub captured the memory sync brief.", content: "- Captured the durable run summary.", data: {} }
+};
+const verdictStatus = phase === "verification" ? "pass" : "info";
+console.log(JSON.stringify({
+  summary: "Cursor stub generated a structured agent step output.",
+  artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
+  handoffs: [],
+  consultations: [
+    {
+      to: "memory-curator",
+      question: "Confirm the durable memory boundary before the next phase.",
+      reason: "Synthetic valid consultation target."
+    },
+    {
+      to: "not-a-real-agent",
+      question: "Need extra context before proceeding.",
+      reason: "Synthetic invalid consultation target."
+    }
+  ],
+  verdict: {
+    status: verdictStatus,
+    summary: verdictStatus === "pass" ? "Cursor stub passed the verification step." : "Cursor stub completed the phase.",
+    findings: []
+  }
+}, null, 2));
+`, "utf8");
+await fs.chmod(agentCursorStubPath, 0o755);
+
+const agentCursorConfig = await readJson(path.join(agentCursorRoot, "config/system.json"), {});
+agentCursorConfig.multiAgentRuntime = {
+  ...(agentCursorConfig.multiAgentRuntime ?? {}),
+  defaultAdapter: "provider-runtime",
+  liveProvider: "cursor",
+  providerByAgentProvider: {
+    default: "cursor",
+    claude: "cursor",
+    gemini: "cursor",
+    codex: "cursor",
+    cursor: "cursor"
+  },
+  nativeCursor: {
+    ...(agentCursorConfig.multiAgentRuntime?.nativeCursor ?? {}),
+    enabled: true,
+    binary: agentCursorStubPath,
+    model: "cursor-stub-model",
+    retryBackoffMs: 0
+  }
+};
+await writeJson(path.join(agentCursorRoot, "config/system.json"), agentCursorConfig);
+
+const agentCursorRun = await runTaskFlow(agentCursorRoot, agentCursorConfig, {
+  task: "tighten deployment README wording and remove repeated guidance",
+  summary: "Let the cursor-backed multi-agent runtime process a routine docs task."
+});
+assert.equal(agentCursorRun.orchestration.rolloutMode, "active");
+const agentCursorSurface = await readTaskRunSurface(agentCursorRoot, agentCursorRun.run.id);
+assert.equal(agentCursorSurface.available, true);
+assert.ok(agentCursorSurface.agentRuns.total >= 4);
+assert.ok(agentCursorSurface.agentRuns.items.every((item) => item.output.adapter === "cursor-native"));
+assert.ok(agentCursorSurface.agentRuns.items.every((item) => item.output.attempts.length >= 1));
+assert.ok(agentCursorSurface.agentRuns.items.every((item) => item.output.normalization.consultationsDropped >= 1));
+
+const agentCursorCli = await execFileAsync(
+  "node",
+  [
+    "src/cli.mjs",
+    "task",
+    "--task",
+    "tighten deployment README wording and remove repeated guidance",
+    "--summary",
+    "Drive the cursor agent runtime through the CLI.",
+    "--agentLive",
+    "--agentProvider",
+    "cursor",
+    "--agentBinary",
+    agentCursorStubPath
+  ],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: agentCursorRoot
+    }
+  }
+);
+const agentCursorCliPayload = JSON.parse(agentCursorCli.stdout);
+assert.equal(agentCursorCliPayload.mode, "task");
+assert.equal(agentCursorCliPayload.runtimeAgentConfig.nativeCursor.enabled, true);
+assert.equal(agentCursorCliPayload.runtimeAgentConfig.defaultAdapter, "provider-runtime");
+
+const agentCommandRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-command-"));
+await fs.cp(path.resolve("config"), path.join(agentCommandRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(agentCommandRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(agentCommandRoot, "state"), { recursive: true });
+await ensureWorkspace(agentCommandRoot);
+
+const agentCommandStubPath = path.join(agentCommandRoot, "command-agent-stub.mjs");
+await fs.writeFile(agentCommandStubPath, `#!/usr/bin/env node
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+  const payload = JSON.parse(raw);
+  const phase = payload.input?.phase ?? "delivery";
+  const artifactByPhase = {
+    triage: { kind: "task-brief", title: "Command task brief", summary: "Command stub planned the run.", content: "- Prepared the task brief.", data: {} },
+    planning: { kind: "acceptance-criteria", title: "Command acceptance criteria", summary: "Command stub clarified scope.", content: "- Clarified scope and acceptance criteria.", data: {} },
+    design: { kind: "design-note", title: "Command design note", summary: "Command stub prepared a design note.", content: "- Captured the design boundaries.", data: {} },
+    delivery: { kind: "change-plan", title: "Command change plan", summary: "Command stub prepared the delivery plan.", content: "- Prepared the implementation slice.", data: {} },
+    verification: { kind: "verification-report", title: "Command verification", summary: "Command stub verified the phase.", content: "- Verification and rollback guidance look sufficient.", data: {} },
+    consolidation: { kind: "final-decision", title: "Command final decision", summary: "Command stub consolidated the run.", content: "- Consolidated the run for finalization.", data: {} },
+    "memory-capture": { kind: "sync-brief", title: "Command sync brief", summary: "Command stub captured the memory sync brief.", content: "- Captured the durable run summary.", data: {} }
+  };
+  const verdictStatus = phase === "verification" ? "pass" : "info";
+  process.stdout.write(JSON.stringify({
+    summary: "Command stub generated a structured agent step output.",
+    artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
+    handoffs: [],
+    consultations: payload.knownAgentIds?.includes("memory-curator")
+      ? [{ to: "memory-curator", question: "Confirm the durable memory boundary before the next phase.", reason: "Synthetic valid consultation target." }]
+      : [],
+    verdict: {
+      status: verdictStatus,
+      summary: verdictStatus === "pass" ? "Command stub passed the verification step." : "Command stub completed the phase.",
+      findings: []
+    }
+  }));
+});
+process.stdin.resume();
+`, "utf8");
+await fs.chmod(agentCommandStubPath, 0o755);
+
+const agentCommandConfig = await readJson(path.join(agentCommandRoot, "config/system.json"), {});
+agentCommandConfig.multiAgentRuntime = {
+  ...(agentCommandConfig.multiAgentRuntime ?? {}),
+  defaultAdapter: "provider-runtime",
+  liveProvider: "external",
+  providerByAgentProvider: {
+    default: "external",
+    claude: "external",
+    gemini: "external",
+    codex: "external",
+    cursor: "external"
+  },
+  commandAdapters: {
+    ...(agentCommandConfig.multiAgentRuntime?.commandAdapters ?? {}),
+    external: {
+      enabled: true,
+      command: "node",
+      args: [agentCommandStubPath]
+    }
+  }
+};
+await writeJson(path.join(agentCommandRoot, "config/system.json"), agentCommandConfig);
+
+const agentCommandRun = await runTaskFlow(agentCommandRoot, agentCommandConfig, {
+  task: "tighten deployment README wording and remove repeated guidance",
+  summary: "Let the command-backed multi-agent runtime process a routine docs task."
+});
+assert.equal(agentCommandRun.orchestration.rolloutMode, "active");
+const agentCommandSurface = await readTaskRunSurface(agentCommandRoot, agentCommandRun.run.id);
+assert.equal(agentCommandSurface.available, true);
+assert.ok(agentCommandSurface.agentRuns.total >= 4);
+assert.ok(agentCommandSurface.agentRuns.items.every((item) => item.output.adapter === "command"));
+assert.ok(agentCommandSurface.agentRuns.items.every((item) => item.output.attempts.length === 1));
+
+const integratePreviewRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-integrate-preview-"));
+await fs.cp(path.resolve("config"), path.join(integratePreviewRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(integratePreviewRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(integratePreviewRoot, "state"), { recursive: true });
+await ensureWorkspace(integratePreviewRoot);
+
+const integratePreviewCli = await execFileAsync(
+  "node",
+  ["src/cli.mjs", "integrate", "--editor", "both"],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: integratePreviewRoot
+    }
+  }
+);
+const integratePreviewPayload = JSON.parse(integratePreviewCli.stdout);
+assert.equal(integratePreviewPayload.mode, "integrate");
+assert.equal(integratePreviewPayload.integration.editor, "both");
+const integrationPackRoot = path.join(integratePreviewRoot, "state/integration/host-pack");
+const integrationManifest = await readJson(path.join(integrationPackRoot, "manifest.json"), null);
+assert.equal(integrationManifest.editor, "both");
+assert.equal(integrationManifest.writeHostFiles, false);
+assert.ok(integrationManifest.files.some((file) => file.relativePath === "AGENTS.md"));
+assert.ok(integrationManifest.files.some((file) => file.relativePath === ".cursor/rules/ai-repo-companion.mdc"));
+const previewAgents = await fs.readFile(path.join(integrationPackRoot, "AGENTS.md"), "utf8");
+const previewCursorRule = await fs.readFile(path.join(integrationPackRoot, ".cursor/rules/ai-repo-companion.mdc"), "utf8");
+assert.match(previewAgents, /AI Repo Companion Host Instructions/);
+assert.match(previewCursorRule, /alwaysApply: true/);
+
+const hostRepoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-integrate-host-"));
+const integrateHostCli = await execFileAsync(
+  "node",
+  [
+    "src/cli.mjs",
+    "integrate",
+    "--editor",
+    "both",
+    "--hostRoot",
+    hostRepoRoot,
+    "--writeHostFiles"
+  ],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: integratePreviewRoot
+    }
+  }
+);
+const integrateHostPayload = JSON.parse(integrateHostCli.stdout);
+assert.equal(integrateHostPayload.integration.writeHostFiles, true);
+const hostAgents = await fs.readFile(path.join(hostRepoRoot, "AGENTS.md"), "utf8");
+const hostCursorRule = await fs.readFile(path.join(hostRepoRoot, ".cursor/rules/ai-repo-companion.mdc"), "utf8");
+assert.match(hostAgents, /run companion commands from `\.ai-repo-companion\/`/);
+assert.match(hostCursorRule, /Use AI Repo Companion as the repository memory/);
 
 const cursorStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-cursor-stub-"));
 const cursorStubPath = path.join(cursorStubDir, "cursor-stub.mjs");

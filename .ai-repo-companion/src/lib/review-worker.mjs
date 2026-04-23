@@ -40,6 +40,23 @@ export async function inspectReviewQueue(rootDir) {
   };
 }
 
+function getReviewReportPath(rootDir, jobId) {
+  return path.join(rootDir, "state/reviews/reports", `${jobId}.json`);
+}
+
+async function persistReviewReportWithJobSnapshot(rootDir, job, report, jobSnapshot = {}) {
+  const reportPath = getReviewReportPath(rootDir, job.id);
+  await persistReviewReport(rootDir, job.id, {
+    ...report,
+    job: {
+      ...job,
+      ...jobSnapshot,
+      reportPath
+    }
+  });
+  return reportPath;
+}
+
 export async function processReviewQueue(rootDir, config, options = {}) {
   // This is the heart of the guarded review pipeline.
   // It is long because it coordinates many small protections in order:
@@ -105,16 +122,18 @@ export async function processReviewQueue(rootDir, config, options = {}) {
 
     if (staleness.action === "skip") {
       const finishedAt = new Date().toISOString();
+      const jobExecution = {
+        provider: "local",
+        adapter: "stale-policy",
+        status: "skipped"
+      };
       const report = {
-        job,
         payload: {
           job,
           contextBundle: null
         },
         execution: {
-          provider: "local",
-          adapter: "stale-policy",
-          status: "skipped",
+          ...jobExecution,
           output: {
             reason: "Review job exceeded the maximum allowed age and was skipped by stale-job policy."
           }
@@ -127,16 +146,17 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         staleness,
         finishedAt
       };
-      const reportPath = await persistReviewReport(rootDir, job.id, report);
+      const reportPath = await persistReviewReportWithJobSnapshot(rootDir, job, report, {
+        status: "completed",
+        finishedAt,
+        execution: jobExecution,
+        staleness
+      });
 
       job.status = "completed";
       job.finishedAt = finishedAt;
       job.reportPath = reportPath;
-      job.execution = {
-        provider: "local",
-        adapter: "stale-policy",
-        status: "skipped"
-      };
+      job.execution = jobExecution;
       job.staleness = staleness;
 
       releaseQueuedSlots(policyState, job.domains);
@@ -194,13 +214,15 @@ export async function processReviewQueue(rootDir, config, options = {}) {
 
       if (valueGate.shouldSkip) {
         const finishedAt = new Date().toISOString();
+        const jobExecution = {
+          provider: "local",
+          adapter: "value-policy",
+          status: "skipped"
+        };
         const report = {
-          job,
           payload,
           execution: {
-            provider: "local",
-            adapter: "value-policy",
-            status: "skipped",
+            ...jobExecution,
             output: {
               reason: "Review job was skipped before any live model call because it did not clear the local value gate.",
               usage: {
@@ -224,16 +246,18 @@ export async function processReviewQueue(rootDir, config, options = {}) {
           },
           finishedAt
         };
-        const reportPath = await persistReviewReport(rootDir, job.id, report);
+        const reportPath = await persistReviewReportWithJobSnapshot(rootDir, job, report, {
+          status: "completed",
+          finishedAt,
+          execution: jobExecution,
+          valueGate,
+          staleness
+        });
 
         job.status = "completed";
         job.finishedAt = finishedAt;
         job.reportPath = reportPath;
-        job.execution = {
-          provider: "local",
-          adapter: "value-policy",
-          status: "skipped"
-        };
+        job.execution = jobExecution;
         job.valueGate = valueGate;
 
         releaseQueuedSlots(policyState, job.domains);
@@ -362,8 +386,16 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         );
       }
 
+      const finalStatus = execution.status === "failed"
+        ? "failed"
+        : (noteChanges.approval?.status === "pending" ? "awaiting-approval" : "completed");
+      const finalExecution = {
+        provider: execution.provider,
+        adapter: execution.adapter,
+        status: execution.status
+      };
+
       const report = {
-        job,
         payload,
         execution,
         noteChanges,
@@ -372,18 +404,19 @@ export async function processReviewQueue(rootDir, config, options = {}) {
         recovery: recoveryCompletion,
         finishedAt
       };
-      const reportPath = await persistReviewReport(rootDir, job.id, report);
+      const reportPath = await persistReviewReportWithJobSnapshot(rootDir, job, report, {
+        status: finalStatus,
+        finishedAt,
+        execution: finalExecution,
+        approval: noteChanges.approval,
+        valueGate,
+        staleness
+      });
 
-      job.status = execution.status === "failed"
-        ? "failed"
-        : (noteChanges.approval?.status === "pending" ? "awaiting-approval" : "completed");
+      job.status = finalStatus;
       job.finishedAt = finishedAt;
       job.reportPath = reportPath;
-      job.execution = {
-        provider: execution.provider,
-        adapter: execution.adapter,
-        status: execution.status
-      };
+      job.execution = finalExecution;
       if (noteChanges.approval?.status === "pending") {
         job.approval = noteChanges.approval;
       }
@@ -427,9 +460,43 @@ export async function processReviewQueue(rootDir, config, options = {}) {
       job.status = "failed";
       job.finishedAt = new Date().toISOString();
       job.error = error.message;
+      const reportPath = await persistReviewReportWithJobSnapshot(rootDir, job, {
+        payload: {
+          job,
+          contextBundle: null
+        },
+        execution: {
+          provider: job.execution?.provider ?? "unknown",
+          adapter: job.execution?.adapter ?? "unknown",
+          status: "failed",
+          output: {
+            reason: error.message,
+            usage: {
+              totalTokens: 0,
+              durationMs: 0
+            }
+          }
+        },
+        noteChanges: {
+          applied: [],
+          skipped: [],
+          reason: error.message
+        },
+        finishedAt: job.finishedAt
+      }, {
+        status: "failed",
+        finishedAt: job.finishedAt,
+        execution: {
+          provider: job.execution?.provider ?? "unknown",
+          adapter: job.execution?.adapter ?? "unknown",
+          status: "failed"
+        }
+      });
+      job.reportPath = reportPath;
       processed.push({
         id: job.id,
         status: "failed",
+        reportPath: job.reportPath,
         error: error.message
       });
       await recordReviewMetricsEvent(rootDir, {

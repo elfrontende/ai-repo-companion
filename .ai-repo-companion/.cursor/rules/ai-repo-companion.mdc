@@ -1,0 +1,26 @@
+---
+description: AI Repo Companion runtime rules for Cursor.
+alwaysApply: true
+---
+
+This repository is the hidden `.ai-repo-companion/` runtime that gets embedded inside a host project.
+
+Working rules:
+
+- keep edits grounded in the current runtime architecture
+- prefer changing `src/lib/`, `config/`, `docs/`, and `tests/`
+- do not hand-edit `state/` unless the task is explicitly about runtime state or fixtures
+- keep new behavior visible through `status`, `report`, `run`, or smoke coverage
+
+Host integration:
+
+- use `npm run integrate -- --editor both` to generate host-facing Codex and Cursor instructions
+- use `npm run integrate -- --editor both --hostRoot .. --writeHostFiles` to write those files into the parent host repo
+- see `docs/HOST-INTEGRATION.md` before changing blind-deployment behavior
+
+Runtime expectations:
+
+- keep `provider-runtime` model-agnostic
+- keep native Codex and Cursor paths working
+- preserve stable stdin/stdout JSON contracts for command adapters
+- if grounding is missing, block the run instead of inventing targets
