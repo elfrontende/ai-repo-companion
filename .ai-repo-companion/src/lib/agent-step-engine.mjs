@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
 import { getAgentContract, validateAgentContractInput, validateAgentContractOutput } from "./agent-contract-engine.mjs";
 
 export async function executeAgentStep(rootDir, config, payload = {}) {
@@ -19,22 +23,149 @@ export async function executeAgentStep(rootDir, config, payload = {}) {
     throw new Error(inputValidation.reason);
   }
 
-  const adapter = config.multiAgentRuntime?.defaultAdapter ?? "local-contract";
-  const output = runLocalContractAdapter(agent, input, contract);
-  const outputValidation = validateAgentContractOutput(contract, output);
+  const adapterConfig = resolveAgentAdapterConfig(config.multiAgentRuntime ?? {});
+  const execution = adapterConfig.adapter === "codex-native"
+    ? await executeNativeCodexAgentAdapter(rootDir, agent, input, contract, adapterConfig.nativeCodex)
+    : buildLocalAgentExecution(agent, input, contract);
+  const outputValidation = validateAgentContractOutput(contract, execution.output);
   if (!outputValidation.ok) {
     throw new Error(outputValidation.reason);
   }
 
   return {
-    provider: agent.provider ?? "local",
-    modelAlias: agent.modelAlias ?? "local",
-    adapter,
+    provider: execution.provider ?? agent.provider ?? "local",
+    modelAlias: execution.modelAlias ?? agent.modelAlias ?? "local",
+    adapter: execution.adapter,
     contract,
     input,
-    output,
+    output: execution.output,
+    attempts: execution.attempts ?? [],
+    usage: execution.usage ?? { totalTokens: null, durationMs: 0 },
+    raw: execution.raw ?? "",
     inputValidation,
     outputValidation
+  };
+}
+
+function resolveAgentAdapterConfig(runtimeConfig) {
+  return {
+    adapter: runtimeConfig.defaultAdapter ?? "local-contract",
+    nativeCodex: runtimeConfig.nativeCodex ?? {}
+  };
+}
+
+function buildLocalAgentExecution(agent, input, contract) {
+  return {
+    provider: agent.provider ?? "local",
+    modelAlias: agent.modelAlias ?? "local",
+    adapter: "local-contract",
+    output: runLocalContractAdapter(agent, input, contract),
+    attempts: [],
+    usage: {
+      totalTokens: null,
+      durationMs: 0
+    }
+  };
+}
+
+async function executeNativeCodexAgentAdapter(rootDir, agent, input, contract, nativeCodex) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-codex-"));
+  const schemaPath = path.join(tempDir, "agent-output-schema.json");
+  const outputPath = path.join(tempDir, "agent-output.json");
+  const schema = buildCodexAgentOutputSchema(contract);
+  const prompt = buildCodexAgentPrompt(agent, input, contract);
+
+  await fs.writeFile(schemaPath, JSON.stringify(schema, null, 2), "utf8");
+
+  const args = [
+    "exec",
+    "-C",
+    rootDir,
+    "--skip-git-repo-check",
+    "--sandbox",
+    nativeCodex.sandbox ?? "workspace-write",
+    "--output-schema",
+    schemaPath,
+    "--output-last-message",
+    outputPath,
+    "-"
+  ];
+
+  if (nativeCodex.model) {
+    args.splice(1, 0, "--model", nativeCodex.model);
+  }
+  const reasoningEffort = mapAgentEffortToCodexReasoning(agent.effort ?? input.taskProfile?.effort ?? "medium");
+  if (reasoningEffort) {
+    args.splice(1, 0, "-c", `model_reasoning_effort="${reasoningEffort}"`);
+  }
+  if (Array.isArray(nativeCodex.extraArgs) && nativeCodex.extraArgs.length > 0) {
+    args.splice(args.length - 1, 0, ...nativeCodex.extraArgs);
+  }
+
+  const retryConfig = {
+    maxAttempts: Math.max(1, Number(nativeCodex.maxAttempts) || 2),
+    retryBackoffMs: Math.max(0, Number(nativeCodex.retryBackoffMs) || 1500)
+  };
+  const attempts = [];
+  let raw = "";
+  let parsed = null;
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt += 1) {
+    const result = await runCommand(nativeCodex.binary ?? "codex", args, prompt, rootDir);
+    lastResult = result;
+    const attemptRecord = {
+      attempt,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      exitCode: result.code,
+      durationMs: result.durationMs
+    };
+
+    if (result.code === 0) {
+      try {
+        raw = await fs.readFile(outputPath, "utf8");
+        parsed = JSON.parse(raw);
+        attempts.push({
+          ...attemptRecord,
+          status: "completed"
+        });
+        break;
+      } catch (error) {
+        attempts.push({
+          ...attemptRecord,
+          status: "failed",
+          parseError: error.message
+        });
+      }
+    } else {
+      attempts.push({
+        ...attemptRecord,
+        status: "failed"
+      });
+    }
+
+    if (attempt < retryConfig.maxAttempts) {
+      await sleep(retryConfig.retryBackoffMs * attempt);
+    }
+  }
+
+  if (!parsed) {
+    throw new Error([
+      `Codex agent step failed for ${agent.id}.`,
+      lastResult?.stderr?.trim?.() ?? "",
+      lastResult?.stdout?.trim?.() ?? ""
+    ].filter(Boolean).join(" "));
+  }
+
+  return {
+    provider: "codex",
+    modelAlias: agent.modelAlias ?? "builder",
+    adapter: "codex-native",
+    output: parsed,
+    attempts,
+    usage: summarizeAttemptUsage(attempts),
+    raw
   };
 }
 
@@ -489,4 +620,190 @@ function buildArtifactText(artifacts) {
     .map((artifact) => [artifact.title, artifact.summary, artifact.content].filter(Boolean).join("\n"))
     .filter(Boolean)
     .join("\n");
+}
+
+function buildCodexAgentPrompt(agent, input, contract) {
+  const artifactLines = (input.artifacts ?? [])
+    .slice(-8)
+    .map((artifact) => `- ${artifact.kind} | ${artifact.title} | ${artifact.summary}`);
+  const handoffLines = input.handoff
+    ? [
+      `From: ${input.handoff.fromAgentId ?? "unknown"}`,
+      `Reason: ${input.handoff.reason ?? "n/a"}`,
+      `Brief: ${input.handoff.brief ?? "n/a"}`,
+      ...(Array.isArray(input.handoff.findings) && input.handoff.findings.length > 0
+        ? ["Findings:", ...input.handoff.findings.map((item) => `- ${item}`)]
+        : [])
+    ]
+    : ["No explicit handoff was provided."];
+
+  return [
+    "You are executing one step in a repository multi-agent runtime.",
+    "Return only structured JSON that matches the provided schema.",
+    `Agent: ${agent.name} (${agent.role})`,
+    `Phase: ${input.phase}`,
+    `Task: ${input.task}`,
+    `Task summary: ${input.summary || "No explicit summary."}`,
+    `Risk: ${input.taskProfile?.risk ?? "low"}`,
+    `Effort: ${input.taskProfile?.effort ?? "low"}`,
+    `Intents: ${(input.taskProfile?.intents ?? []).join(", ") || "implementation"}`,
+    `Attempt: ${input.attempt}`,
+    "",
+    "Allowed actions:",
+    ...(contract.allowedActions ?? []).map((item) => `- ${item}`),
+    "",
+    "Success criteria:",
+    ...(contract.successCriteria ?? []).map((item) => `- ${item}`),
+    "",
+    "Handoff:",
+    ...handoffLines,
+    "",
+    "Recent upstream artifacts:",
+    ...(artifactLines.length > 0 ? artifactLines : ["- No upstream artifacts yet."]),
+    "",
+    "Output rules:",
+    "- Keep artifacts concise and operational.",
+    "- Use verdict status pass only when the phase is genuinely satisfied.",
+    "- Use needs-rework only when the next owner can fix the issue in one bounded retry.",
+    "- Use blocked only when the run cannot proceed safely.",
+    "- Keep consultations and handoffs small and explicit."
+  ].join("\n");
+}
+
+function buildCodexAgentOutputSchema(contract) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "artifacts", "handoffs", "consultations", "verdict"],
+    properties: {
+      summary: { type: "string" },
+      artifacts: {
+        type: "array",
+        maxItems: Math.max(1, (contract.defaultArtifactKinds ?? []).length || 2),
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "title", "summary", "content", "data"],
+          properties: {
+            kind: { type: "string" },
+            title: { type: "string" },
+            summary: { type: "string" },
+            content: { type: "string" },
+            data: {
+              type: "object",
+              additionalProperties: false,
+              properties: {}
+            }
+          }
+        }
+      },
+      handoffs: {
+        type: "array",
+        maxItems: 3,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["to", "reason", "brief"],
+          properties: {
+            to: { type: "string" },
+            reason: { type: "string" },
+            brief: { type: "string" }
+          }
+        }
+      },
+      consultations: {
+        type: "array",
+        maxItems: 3,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["to", "question", "reason"],
+          properties: {
+            to: { type: "string" },
+            question: { type: "string" },
+            reason: { type: "string" }
+          }
+        }
+      },
+      verdict: {
+        type: "object",
+        additionalProperties: false,
+        required: ["status", "summary", "findings"],
+        properties: {
+          status: {
+            type: "string",
+            enum: ["pass", "needs-rework", "blocked", "info"]
+          },
+          summary: { type: "string" },
+          findings: {
+            type: "array",
+            items: { type: "string" }
+          }
+        }
+      }
+    }
+  };
+}
+
+function mapAgentEffortToCodexReasoning(effort) {
+  if (effort === "high") {
+    return "high";
+  }
+  if (effort === "low") {
+    return "low";
+  }
+  return "medium";
+}
+
+function runCommand(command, args, stdinBody, cwd) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({
+        code,
+        stdout,
+        stderr,
+        durationMs: Date.now() - startedAt
+      });
+    });
+
+    child.stdin.write(stdinBody);
+    child.stdin.end();
+  });
+}
+
+function summarizeAttemptUsage(attempts) {
+  const totalTokens = attempts.reduce((sum, attempt) => sum + (extractTokenUsageFromText(attempt.stdout) ?? 0) + (extractTokenUsageFromText(attempt.stderr) ?? 0), 0);
+  const durationMs = attempts.reduce((sum, attempt) => sum + (Number(attempt.durationMs) || 0), 0);
+  return {
+    totalTokens: totalTokens > 0 ? totalTokens : null,
+    durationMs
+  };
+}
+
+function extractTokenUsageFromText(text) {
+  if (!text) {
+    return null;
+  }
+  const match = text.match(/tokens used\s+([\d,]+)/i);
+  return match ? Number(match[1].replaceAll(",", "")) : null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

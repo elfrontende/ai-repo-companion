@@ -78,7 +78,12 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     });
   }
 
-  if (latestRunSurface.available && latestRunSurface.verdicts.blocking > 0 && latestRunSurface.retries.open === 0 && latestRunSurface.run.multiAgentStatus !== "blocked") {
+  if (
+    latestRunSurface.available
+    && latestRunSurface.verdicts.blocking > 0
+    && latestRunSurface.retries.open === 0
+    && !["blocked", "needs-rework"].includes(latestRunSurface.run.multiAgentStatus)
+  ) {
     findings.push({
       severity: "warning",
       code: "needs-rework-without-retry",
