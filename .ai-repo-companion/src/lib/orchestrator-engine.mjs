@@ -223,7 +223,8 @@ async function executePhase(rootDir, config, payload, phase, state, rollout, opt
       handoff: handoffRecord?.handoff ?? null,
       artifacts: state.allArtifacts,
       contextBundle: payload.contextBundle,
-      attempt: options.attempt ?? 1
+      attempt: options.attempt ?? 1,
+      knownAgentIds: payload.plan.agents.map((item) => item.id)
     });
     await updateRunHandoff(rootDir, runId, handoffRecord.handoff.id, {
       status: "consumed"
@@ -253,7 +254,8 @@ async function executePhase(rootDir, config, payload, phase, state, rollout, opt
         reason: consultation.reason,
         brief: consultation.question,
         artifactIds: phaseArtifacts.map((item) => item.id),
-        consultation: true
+        consultation: true,
+        status: "advisory"
       });
     }
 
@@ -293,7 +295,10 @@ async function executePhase(rootDir, config, payload, phase, state, rollout, opt
           status: item.status,
           exitCode: item.exitCode,
           durationMs: item.durationMs
-        })) ?? []
+        })) ?? [],
+        normalization: execution.normalization ?? null,
+        consultations: execution.output.consultations.length,
+        handoffs: execution.output.handoffs.length
       }
     });
   }

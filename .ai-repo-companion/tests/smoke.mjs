@@ -2587,7 +2587,18 @@ process.stdin.on("end", async () => {
     summary: "Codex stub generated a structured agent step output.",
     artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
     handoffs: [],
-    consultations: [],
+    consultations: [
+      {
+        to: "memory-curator",
+        question: "Confirm the durable memory boundary before the next phase.",
+        reason: "Synthetic valid consultation target."
+      },
+      {
+        to: "not-a-real-agent",
+        question: "Need extra context before proceeding.",
+        reason: "Synthetic invalid consultation target."
+      }
+    ],
     verdict: {
       status: verdictStatus,
       summary: verdictStatus === "pass" ? "Codex stub passed the verification step." : "Codex stub completed the phase.",
@@ -2626,6 +2637,9 @@ assert.ok(agentCodexSurface.agentRuns.total >= 4);
 assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.adapter === "codex-native"));
 assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.usageSummary.durationMs >= 0));
 assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.attempts.length >= 1));
+assert.ok(agentCodexSurface.handoffs.consultations >= 1);
+assert.equal(agentCodexSurface.handoffs.pending, 0);
+assert.ok(agentCodexSurface.agentRuns.items.every((item) => item.output.normalization.consultationsDropped >= 1));
 
 const agentCodexCli = await execFileAsync(
   "node",

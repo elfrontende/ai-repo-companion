@@ -25,7 +25,16 @@
       "sandbox": "workspace-write",
       "maxAttempts": 2,
       "retryBackoffMs": 1500,
-      "extraArgs": []
+      "extraArgs": [],
+      "allowUnknownConsultationTargets": false,
+      "promptControls": {
+        "maxArtifacts": 4,
+        "maxArtifactSummaryChars": 140,
+        "maxHandoffFindings": 4,
+        "maxAllowedActions": 3,
+        "maxSuccessCriteria": 3,
+        "maxTaskSummaryChars": 220
+      }
     }
   },
   "memoryPolicy": {

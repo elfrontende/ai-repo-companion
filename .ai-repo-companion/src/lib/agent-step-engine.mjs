@@ -25,9 +25,14 @@ export async function executeAgentStep(rootDir, config, payload = {}) {
 
   const adapterConfig = resolveAgentAdapterConfig(config.multiAgentRuntime ?? {});
   const execution = adapterConfig.adapter === "codex-native"
-    ? await executeNativeCodexAgentAdapter(rootDir, agent, input, contract, adapterConfig.nativeCodex)
+    ? await executeNativeCodexAgentAdapter(rootDir, agent, input, contract, adapterConfig.nativeCodex, payload.knownAgentIds ?? [])
     : buildLocalAgentExecution(agent, input, contract);
-  const outputValidation = validateAgentContractOutput(contract, execution.output);
+  const normalizedOutput = normalizeAgentExecutionOutput(execution.output, {
+    knownAgentIds: payload.knownAgentIds ?? [],
+    currentAgentId: agent.id,
+    allowUnknownConsultationTargets: adapterConfig.nativeCodex?.allowUnknownConsultationTargets === true
+  });
+  const outputValidation = validateAgentContractOutput(contract, normalizedOutput.output);
   if (!outputValidation.ok) {
     throw new Error(outputValidation.reason);
   }
@@ -38,10 +43,11 @@ export async function executeAgentStep(rootDir, config, payload = {}) {
     adapter: execution.adapter,
     contract,
     input,
-    output: execution.output,
+    output: normalizedOutput.output,
     attempts: execution.attempts ?? [],
     usage: execution.usage ?? { totalTokens: null, durationMs: 0 },
     raw: execution.raw ?? "",
+    normalization: normalizedOutput.normalization,
     inputValidation,
     outputValidation
   };
@@ -68,12 +74,12 @@ function buildLocalAgentExecution(agent, input, contract) {
   };
 }
 
-async function executeNativeCodexAgentAdapter(rootDir, agent, input, contract, nativeCodex) {
+async function executeNativeCodexAgentAdapter(rootDir, agent, input, contract, nativeCodex, knownAgentIds = []) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-codex-"));
   const schemaPath = path.join(tempDir, "agent-output-schema.json");
   const outputPath = path.join(tempDir, "agent-output.json");
   const schema = buildCodexAgentOutputSchema(contract);
-  const prompt = buildCodexAgentPrompt(agent, input, contract);
+  const prompt = buildCodexAgentPrompt(agent, input, contract, nativeCodex, knownAgentIds);
 
   await fs.writeFile(schemaPath, JSON.stringify(schema, null, 2), "utf8");
 
@@ -166,6 +172,57 @@ async function executeNativeCodexAgentAdapter(rootDir, agent, input, contract, n
     attempts,
     usage: summarizeAttemptUsage(attempts),
     raw
+  };
+}
+
+function normalizeAgentExecutionOutput(output, options = {}) {
+  const knownAgentIds = new Set((options.knownAgentIds ?? []).filter(Boolean));
+  const allowUnknownConsultationTargets = options.allowUnknownConsultationTargets === true;
+  const currentAgentId = options.currentAgentId ?? null;
+  const normalization = {
+    consultationsDropped: 0,
+    handoffsDropped: 0
+  };
+
+  const normalizedConsultations = (output?.consultations ?? []).filter((consultation) => {
+    if (!consultation?.to) {
+      normalization.consultationsDropped += 1;
+      return false;
+    }
+    if (consultation.to === currentAgentId) {
+      normalization.consultationsDropped += 1;
+      return false;
+    }
+    if (!allowUnknownConsultationTargets && knownAgentIds.size > 0 && !knownAgentIds.has(consultation.to)) {
+      normalization.consultationsDropped += 1;
+      return false;
+    }
+    return true;
+  });
+
+  const normalizedHandoffs = (output?.handoffs ?? []).filter((handoff) => {
+    if (!handoff?.to) {
+      normalization.handoffsDropped += 1;
+      return false;
+    }
+    if (handoff.to === currentAgentId) {
+      normalization.handoffsDropped += 1;
+      return false;
+    }
+    if (!allowUnknownConsultationTargets && knownAgentIds.size > 0 && !knownAgentIds.has(handoff.to)) {
+      normalization.handoffsDropped += 1;
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    output: {
+      ...output,
+      consultations: normalizedConsultations,
+      handoffs: normalizedHandoffs
+    },
+    normalization
   };
 }
 
@@ -622,20 +679,26 @@ function buildArtifactText(artifacts) {
     .join("\n");
 }
 
-function buildCodexAgentPrompt(agent, input, contract) {
+function buildCodexAgentPrompt(agent, input, contract, nativeCodex = {}, knownAgentIds = []) {
+  const promptControls = normalizePromptControls(nativeCodex.promptControls ?? {});
   const artifactLines = (input.artifacts ?? [])
-    .slice(-8)
-    .map((artifact) => `- ${artifact.kind} | ${artifact.title} | ${artifact.summary}`);
+    .slice(-promptControls.maxArtifacts)
+    .map((artifact) => `- ${artifact.kind} | ${truncatePromptText(artifact.title, 80)} | ${truncatePromptText(artifact.summary, promptControls.maxArtifactSummaryChars)}`);
   const handoffLines = input.handoff
     ? [
       `From: ${input.handoff.fromAgentId ?? "unknown"}`,
-      `Reason: ${input.handoff.reason ?? "n/a"}`,
-      `Brief: ${input.handoff.brief ?? "n/a"}`,
+      `Reason: ${truncatePromptText(input.handoff.reason ?? "n/a", 180)}`,
+      `Brief: ${truncatePromptText(input.handoff.brief ?? "n/a", 180)}`,
       ...(Array.isArray(input.handoff.findings) && input.handoff.findings.length > 0
-        ? ["Findings:", ...input.handoff.findings.map((item) => `- ${item}`)]
+        ? ["Findings:", ...input.handoff.findings.slice(0, promptControls.maxHandoffFindings).map((item) => `- ${truncatePromptText(item, 160)}`)]
         : [])
     ]
     : ["No explicit handoff was provided."];
+  const allowedActions = (contract.allowedActions ?? []).slice(0, promptControls.maxAllowedActions);
+  const successCriteria = (contract.successCriteria ?? []).slice(0, promptControls.maxSuccessCriteria);
+  const availableConsultationTargets = knownAgentIds
+    .filter((id) => id && id !== agent.id)
+    .slice(0, 8);
 
   return [
     "You are executing one step in a repository multi-agent runtime.",
@@ -643,17 +706,17 @@ function buildCodexAgentPrompt(agent, input, contract) {
     `Agent: ${agent.name} (${agent.role})`,
     `Phase: ${input.phase}`,
     `Task: ${input.task}`,
-    `Task summary: ${input.summary || "No explicit summary."}`,
+    `Task summary: ${truncatePromptText(input.summary || "No explicit summary.", promptControls.maxTaskSummaryChars)}`,
     `Risk: ${input.taskProfile?.risk ?? "low"}`,
     `Effort: ${input.taskProfile?.effort ?? "low"}`,
     `Intents: ${(input.taskProfile?.intents ?? []).join(", ") || "implementation"}`,
     `Attempt: ${input.attempt}`,
     "",
     "Allowed actions:",
-    ...(contract.allowedActions ?? []).map((item) => `- ${item}`),
+    ...(allowedActions.length > 0 ? allowedActions.map((item) => `- ${item}`) : ["- Keep the phase scoped to the contract."]),
     "",
     "Success criteria:",
-    ...(contract.successCriteria ?? []).map((item) => `- ${item}`),
+    ...(successCriteria.length > 0 ? successCriteria.map((item) => `- ${truncatePromptText(item, 160)}`) : ["- Produce one concise phase result."]),
     "",
     "Handoff:",
     ...handoffLines,
@@ -661,12 +724,16 @@ function buildCodexAgentPrompt(agent, input, contract) {
     "Recent upstream artifacts:",
     ...(artifactLines.length > 0 ? artifactLines : ["- No upstream artifacts yet."]),
     "",
+    "Valid consultation targets:",
+    ...(availableConsultationTargets.length > 0 ? availableConsultationTargets.map((item) => `- ${item}`) : ["- None for this phase."]),
+    "",
     "Output rules:",
     "- Keep artifacts concise and operational.",
     "- Use verdict status pass only when the phase is genuinely satisfied.",
     "- Use needs-rework only when the next owner can fix the issue in one bounded retry.",
     "- Use blocked only when the run cannot proceed safely.",
-    "- Keep consultations and handoffs small and explicit."
+    "- Keep consultations and handoffs small and explicit.",
+    "- Do not invent new agent ids. Only use the listed consultation targets."
   ].join("\n");
 }
 
@@ -806,4 +873,23 @@ function extractTokenUsageFromText(text) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizePromptControls(promptControls = {}) {
+  return {
+    maxArtifacts: Math.max(1, Number(promptControls.maxArtifacts) || 4),
+    maxArtifactSummaryChars: Math.max(40, Number(promptControls.maxArtifactSummaryChars) || 140),
+    maxHandoffFindings: Math.max(1, Number(promptControls.maxHandoffFindings) || 4),
+    maxAllowedActions: Math.max(1, Number(promptControls.maxAllowedActions) || 3),
+    maxSuccessCriteria: Math.max(1, Number(promptControls.maxSuccessCriteria) || 3),
+    maxTaskSummaryChars: Math.max(80, Number(promptControls.maxTaskSummaryChars) || 220)
+  };
+}
+
+function truncatePromptText(value, maxChars) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
