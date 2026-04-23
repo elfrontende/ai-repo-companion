@@ -321,27 +321,67 @@ async function executeCommandAdapter(rootDir, provider, payload, commandConfig) 
 
   const args = (commandConfig.args ?? []).map((arg) => interpolateArg(arg, payload, provider));
   const result = await runCommand(commandConfig.command, args, JSON.stringify(payload, null, 2), rootDir);
+  const usage = summarizeAttemptUsage([{
+    attempt: 1,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    exitCode: result.code,
+    durationMs: result.durationMs,
+    status: result.code === 0 ? "completed" : "failed"
+  }]);
 
-  return {
-    provider,
-    adapter: "command",
-    status: result.code === 0 ? "completed" : "failed",
-    output: {
-      command: commandConfig.command,
-      args,
-      usage: summarizeAttemptUsage([{
-        attempt: 1,
+  if (result.code !== 0) {
+    return {
+      provider,
+      adapter: "command",
+      status: "failed",
+      output: {
+        command: commandConfig.command,
+        args,
+        usage,
+        stdout: result.stdout.trim(),
+        stderr: result.stderr.trim(),
+        exitCode: result.code
+      }
+    };
+  }
+
+  try {
+    const raw = extractJsonPayload(result.stdout);
+    const parsed = JSON.parse(raw);
+
+    return {
+      provider,
+      adapter: "command",
+      status: "completed",
+      output: {
+        command: commandConfig.command,
+        args,
+        usage,
         stdout: result.stdout.trim(),
         stderr: result.stderr.trim(),
         exitCode: result.code,
-        durationMs: result.durationMs,
-        status: result.code === 0 ? "completed" : "failed"
-      }]),
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-      exitCode: result.code
-    }
-  };
+        raw,
+        parsed
+      }
+    };
+  } catch (error) {
+    return {
+      provider,
+      adapter: "command",
+      status: "failed",
+      output: {
+        command: commandConfig.command,
+        args,
+        usage,
+        stdout: result.stdout.trim(),
+        stderr: result.stderr.trim(),
+        exitCode: result.code,
+        parseError: error.message
+      }
+    };
+  }
+
 }
 
 function buildReviewPrompt(payload, reviewProfile = {}) {
