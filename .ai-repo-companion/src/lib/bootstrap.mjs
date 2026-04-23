@@ -37,6 +37,8 @@ export async function ensureWorkspace(rootDir) {
     "state/runs/verdicts",
     "state/runs/retries",
     "state/benchmarks",
+    "state/integration",
+    "state/integration/host-pack",
     "state/memory",
     "state/reviews",
     "state/reviews/approvals",

@@ -534,3 +534,28 @@ This is intentionally simple:
 - file watchers or daemonized background workers
 
 The current scaffold is the orchestration and memory layer that those adapters can plug into later.
+
+## Host integration and blind deployment
+
+The runtime can now generate host-facing instructions for both Codex and Cursor.
+
+Generate a preview pack:
+
+```bash
+npm run integrate -- --editor both
+```
+
+Write host files directly into the parent repository:
+
+```bash
+npm run integrate -- --editor both --hostRoot .. --writeHostFiles
+```
+
+That pack includes:
+
+- `AGENTS.md` for Codex-aware hosts
+- `.cursor/rules/ai-repo-companion.mdc` with `alwaysApply: true` for Cursor
+- an install guide
+- a command adapter contract for non-native backends
+
+The full operating model lives in `docs/HOST-INTEGRATION.md`.
