@@ -47,6 +47,10 @@ npm run integrate -- --editor codex --hostRoot .. --writeHostFiles
 
 Cursor project rules live under `.cursor/rules/*.mdc`.
 
+If you need a step-by-step setup for an existing host repository, read:
+
+- `docs/CURSOR-EXISTING-PROJECT-SETUP.md`
+
 Generate the rule pack with:
 
 ```bash
