@@ -11,6 +11,14 @@
     "persistWorkingMemory": "pointers-only",
     "syncMode": "background-pipeline"
   },
+  "multiAgentRuntime": {
+    "enabled": true,
+    "rolloutMode": "active",
+    "defaultAdapter": "local-contract",
+    "maxReworkLoops": 2,
+    "allowConsultations": true,
+    "requireWritableOwnerForRework": true
+  },
   "memoryPolicy": {
     "defaultMode": "cheap",
     "balancedTokenBudget": 300,
