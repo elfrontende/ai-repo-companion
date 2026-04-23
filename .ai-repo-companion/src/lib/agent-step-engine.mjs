@@ -1,8 +1,13 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { getAgentContract, validateAgentContractInput, validateAgentContractOutput } from "./agent-contract-engine.mjs";
+import {
+  extractJsonPayload,
+  runCommand,
+  sleep,
+  summarizeAttemptUsage
+} from "./external-cli-utils.mjs";
 
 export async function executeAgentStep(rootDir, config, payload = {}) {
   const agent = payload.agent ?? {};
@@ -24,13 +29,12 @@ export async function executeAgentStep(rootDir, config, payload = {}) {
   }
 
   const adapterConfig = resolveAgentAdapterConfig(config.multiAgentRuntime ?? {});
-  const execution = adapterConfig.adapter === "codex-native"
-    ? await executeNativeCodexAgentAdapter(rootDir, agent, input, contract, adapterConfig.nativeCodex, payload.knownAgentIds ?? [])
-    : buildLocalAgentExecution(agent, input, contract);
+  const executionTarget = resolveAgentExecutionTarget(agent, adapterConfig);
+  const execution = await executeResolvedAgentAdapter(rootDir, agent, input, contract, executionTarget, payload.knownAgentIds ?? []);
   const normalizedOutput = normalizeAgentExecutionOutput(execution.output, {
     knownAgentIds: payload.knownAgentIds ?? [],
     currentAgentId: agent.id,
-    allowUnknownConsultationTargets: adapterConfig.nativeCodex?.allowUnknownConsultationTargets === true
+    allowUnknownConsultationTargets: executionTarget.allowUnknownConsultationTargets === true
   });
   const outputValidation = validateAgentContractOutput(contract, normalizedOutput.output);
   if (!outputValidation.ok) {
@@ -56,8 +60,136 @@ export async function executeAgentStep(rootDir, config, payload = {}) {
 function resolveAgentAdapterConfig(runtimeConfig) {
   return {
     adapter: runtimeConfig.defaultAdapter ?? "local-contract",
-    nativeCodex: runtimeConfig.nativeCodex ?? {}
+    liveProvider: runtimeConfig.liveProvider ?? "codex",
+    providerByAgentProvider: runtimeConfig.providerByAgentProvider ?? {},
+    nativeCodex: runtimeConfig.nativeCodex ?? {},
+    nativeCursor: runtimeConfig.nativeCursor ?? {},
+    commandAdapters: runtimeConfig.commandAdapters ?? {}
   };
+}
+
+function resolveAgentExecutionTarget(agent, adapterConfig) {
+  const adapter = adapterConfig.adapter ?? "local-contract";
+
+  if (adapter === "local-contract") {
+    return {
+      adapter: "local-contract",
+      provider: agent.provider ?? "local",
+      modelAlias: agent.modelAlias ?? "local",
+      allowUnknownConsultationTargets: false
+    };
+  }
+
+  if (adapter === "codex-native") {
+    return {
+      adapter: "codex-native",
+      provider: "codex",
+      modelAlias: agent.modelAlias ?? "builder",
+      config: adapterConfig.nativeCodex,
+      allowUnknownConsultationTargets: adapterConfig.nativeCodex?.allowUnknownConsultationTargets === true
+    };
+  }
+
+  if (adapter === "cursor-native") {
+    return {
+      adapter: "cursor-native",
+      provider: "cursor",
+      modelAlias: agent.modelAlias ?? "inline",
+      config: adapterConfig.nativeCursor,
+      allowUnknownConsultationTargets: adapterConfig.nativeCursor?.allowUnknownConsultationTargets === true
+    };
+  }
+
+  if (adapter === "command") {
+    const commandProvider = resolveMappedProvider(agent, adapterConfig);
+    const commandConfig = findCommandAdapter(commandProvider, adapterConfig.commandAdapters);
+    if (!commandConfig) {
+      throw new Error(`Agent command adapter is enabled for provider "${commandProvider}" but no command is configured.`);
+    }
+    return {
+      adapter: "command",
+      provider: commandProvider,
+      modelAlias: agent.modelAlias ?? commandProvider,
+      config: commandConfig,
+      allowUnknownConsultationTargets: false
+    };
+  }
+
+  if (adapter === "provider-runtime") {
+    const mappedProvider = resolveMappedProvider(agent, adapterConfig);
+
+    if (mappedProvider === "codex" && adapterConfig.nativeCodex?.enabled) {
+      return {
+        adapter: "codex-native",
+        provider: "codex",
+        modelAlias: agent.modelAlias ?? "builder",
+        config: adapterConfig.nativeCodex,
+        allowUnknownConsultationTargets: adapterConfig.nativeCodex?.allowUnknownConsultationTargets === true
+      };
+    }
+
+    if (mappedProvider === "cursor" && adapterConfig.nativeCursor?.enabled) {
+      return {
+        adapter: "cursor-native",
+        provider: "cursor",
+        modelAlias: agent.modelAlias ?? "inline",
+        config: adapterConfig.nativeCursor,
+        allowUnknownConsultationTargets: adapterConfig.nativeCursor?.allowUnknownConsultationTargets === true
+      };
+    }
+
+    const commandConfig = findCommandAdapter(mappedProvider, adapterConfig.commandAdapters);
+    if (commandConfig) {
+      return {
+        adapter: "command",
+        provider: mappedProvider,
+        modelAlias: agent.modelAlias ?? mappedProvider,
+        config: commandConfig,
+        allowUnknownConsultationTargets: false
+      };
+    }
+
+    throw new Error(`No live agent adapter is enabled for mapped provider "${mappedProvider}".`);
+  }
+
+  throw new Error(`Unsupported agent adapter "${adapter}".`);
+}
+
+async function executeResolvedAgentAdapter(rootDir, agent, input, contract, target, knownAgentIds = []) {
+  if (target.adapter === "local-contract") {
+    return buildLocalAgentExecution(agent, input, contract);
+  }
+  if (target.adapter === "codex-native") {
+    return executeNativeCodexAgentAdapter(rootDir, agent, input, contract, target.config, knownAgentIds);
+  }
+  if (target.adapter === "cursor-native") {
+    return executeNativeCursorAgentAdapter(rootDir, agent, input, contract, target.config, knownAgentIds);
+  }
+  if (target.adapter === "command") {
+    return executeCommandAgentAdapter(rootDir, agent, input, contract, target.provider, target.config, knownAgentIds);
+  }
+
+  throw new Error(`Unsupported resolved agent adapter "${target.adapter}".`);
+}
+
+function resolveMappedProvider(agent, adapterConfig) {
+  const sourceProvider = agent.provider ?? "default";
+  return adapterConfig.providerByAgentProvider?.[sourceProvider]
+    ?? adapterConfig.providerByAgentProvider?.default
+    ?? adapterConfig.liveProvider
+    ?? sourceProvider;
+}
+
+function findCommandAdapter(provider, commandAdapters = {}) {
+  const direct = commandAdapters?.[provider];
+  if (direct?.enabled && direct.command) {
+    return direct;
+  }
+  const fallback = commandAdapters?.default;
+  if (fallback?.enabled && fallback.command) {
+    return fallback;
+  }
+  return null;
 }
 
 function buildLocalAgentExecution(agent, input, contract) {
@@ -168,6 +300,171 @@ async function executeNativeCodexAgentAdapter(rootDir, agent, input, contract, n
     provider: "codex",
     modelAlias: agent.modelAlias ?? "builder",
     adapter: "codex-native",
+    output: parsed,
+    attempts,
+    usage: summarizeAttemptUsage(attempts),
+    raw
+  };
+}
+
+async function executeNativeCursorAgentAdapter(rootDir, agent, input, contract, nativeCursor, knownAgentIds = []) {
+  const prompt = buildCursorAgentPrompt(agent, input, contract, nativeCursor, knownAgentIds);
+  const args = [
+    nativeCursor.mode === "agent" ? "agent" : nativeCursor.mode,
+    "--print",
+    "--output-format",
+    "text"
+  ];
+
+  if (nativeCursor.mode && nativeCursor.mode !== "agent") {
+    args.push("--mode", nativeCursor.mode);
+  }
+
+  args.push("--workspace", rootDir);
+
+  if (nativeCursor.trustWorkspace !== false) {
+    args.push("--trust");
+  }
+  if (nativeCursor.force === true) {
+    args.push("--force");
+  }
+  if (nativeCursor.sandbox) {
+    args.push("--sandbox", nativeCursor.sandbox);
+  }
+  if (nativeCursor.model) {
+    args.push("--model", nativeCursor.model);
+  }
+  if (Array.isArray(nativeCursor.extraArgs) && nativeCursor.extraArgs.length > 0) {
+    args.push(...nativeCursor.extraArgs);
+  }
+  args.push(prompt);
+
+  const retryConfig = {
+    maxAttempts: Math.max(1, Number(nativeCursor.maxAttempts) || 2),
+    retryBackoffMs: Math.max(0, Number(nativeCursor.retryBackoffMs) || 1500)
+  };
+  const attempts = [];
+  let raw = "";
+  let parsed = null;
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt += 1) {
+    const result = await runCommand(nativeCursor.binary ?? "cursor", args, "", rootDir);
+    lastResult = result;
+    const attemptRecord = {
+      attempt,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      exitCode: result.code,
+      durationMs: result.durationMs
+    };
+
+    if (result.code === 0) {
+      try {
+        raw = extractJsonPayload(result.stdout);
+        parsed = JSON.parse(raw);
+        attempts.push({
+          ...attemptRecord,
+          status: "completed"
+        });
+        break;
+      } catch (error) {
+        attempts.push({
+          ...attemptRecord,
+          status: "failed",
+          parseError: error.message
+        });
+      }
+    } else {
+      attempts.push({
+        ...attemptRecord,
+        status: "failed"
+      });
+    }
+
+    if (attempt < retryConfig.maxAttempts) {
+      await sleep(retryConfig.retryBackoffMs * attempt);
+    }
+  }
+
+  if (!parsed) {
+    throw new Error([
+      `Cursor agent step failed for ${agent.id}.`,
+      lastResult?.stderr?.trim?.() ?? "",
+      lastResult?.stdout?.trim?.() ?? ""
+    ].filter(Boolean).join(" "));
+  }
+
+  return {
+    provider: "cursor",
+    modelAlias: agent.modelAlias ?? "inline",
+    adapter: "cursor-native",
+    output: parsed,
+    attempts,
+    usage: summarizeAttemptUsage(attempts),
+    raw
+  };
+}
+
+async function executeCommandAgentAdapter(rootDir, agent, input, contract, provider, commandConfig, knownAgentIds = []) {
+  if (!commandConfig?.command) {
+    throw new Error(`Agent command adapter for provider "${provider}" is enabled but has no command.`);
+  }
+
+  const args = (commandConfig.args ?? []).map((arg) => interpolateAgentAdapterArg(arg, {
+    provider,
+    agentId: agent.id,
+    role: agent.role,
+    phase: input.phase,
+    task: input.task
+  }));
+  const payload = {
+    mode: "multi-agent-step",
+    provider,
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      role: agent.role,
+      provider: agent.provider,
+      modelAlias: agent.modelAlias,
+      effort: agent.effort,
+      contractId: agent.contractId
+    },
+    contract: {
+      inputSchema: contract.inputSchema,
+      outputSchema: contract.outputSchema,
+      allowedActions: contract.allowedActions,
+      successCriteria: contract.successCriteria,
+      defaultArtifactKinds: contract.defaultArtifactKinds
+    },
+    input,
+    knownAgentIds
+  };
+  const result = await runCommand(commandConfig.command, args, JSON.stringify(payload, null, 2), rootDir);
+  const attempts = [{
+    attempt: 1,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    exitCode: result.code,
+    durationMs: result.durationMs,
+    status: result.code === 0 ? "completed" : "failed"
+  }];
+
+  if (result.code !== 0) {
+    throw new Error([
+      `Command agent adapter failed for ${agent.id}.`,
+      result.stderr.trim(),
+      result.stdout.trim()
+    ].filter(Boolean).join(" "));
+  }
+
+  const raw = extractJsonPayload(result.stdout);
+  const parsed = JSON.parse(raw);
+
+  return {
+    provider,
+    modelAlias: agent.modelAlias ?? provider,
+    adapter: "command",
     output: parsed,
     attempts,
     usage: summarizeAttemptUsage(attempts),
@@ -681,24 +978,7 @@ function buildArtifactText(artifacts) {
 
 function buildCodexAgentPrompt(agent, input, contract, nativeCodex = {}, knownAgentIds = []) {
   const promptControls = normalizePromptControls(nativeCodex.promptControls ?? {});
-  const artifactLines = (input.artifacts ?? [])
-    .slice(-promptControls.maxArtifacts)
-    .map((artifact) => `- ${artifact.kind} | ${truncatePromptText(artifact.title, 80)} | ${truncatePromptText(artifact.summary, promptControls.maxArtifactSummaryChars)}`);
-  const handoffLines = input.handoff
-    ? [
-      `From: ${input.handoff.fromAgentId ?? "unknown"}`,
-      `Reason: ${truncatePromptText(input.handoff.reason ?? "n/a", 180)}`,
-      `Brief: ${truncatePromptText(input.handoff.brief ?? "n/a", 180)}`,
-      ...(Array.isArray(input.handoff.findings) && input.handoff.findings.length > 0
-        ? ["Findings:", ...input.handoff.findings.slice(0, promptControls.maxHandoffFindings).map((item) => `- ${truncatePromptText(item, 160)}`)]
-        : [])
-    ]
-    : ["No explicit handoff was provided."];
-  const allowedActions = (contract.allowedActions ?? []).slice(0, promptControls.maxAllowedActions);
-  const successCriteria = (contract.successCriteria ?? []).slice(0, promptControls.maxSuccessCriteria);
-  const availableConsultationTargets = knownAgentIds
-    .filter((id) => id && id !== agent.id)
-    .slice(0, 8);
+  const sections = buildAgentPromptSections(agent, input, contract, promptControls, knownAgentIds);
 
   return [
     "You are executing one step in a repository multi-agent runtime.",
@@ -713,19 +993,19 @@ function buildCodexAgentPrompt(agent, input, contract, nativeCodex = {}, knownAg
     `Attempt: ${input.attempt}`,
     "",
     "Allowed actions:",
-    ...(allowedActions.length > 0 ? allowedActions.map((item) => `- ${item}`) : ["- Keep the phase scoped to the contract."]),
+    ...sections.allowedActions,
     "",
     "Success criteria:",
-    ...(successCriteria.length > 0 ? successCriteria.map((item) => `- ${truncatePromptText(item, 160)}`) : ["- Produce one concise phase result."]),
+    ...sections.successCriteria,
     "",
     "Handoff:",
-    ...handoffLines,
+    ...sections.handoffLines,
     "",
     "Recent upstream artifacts:",
-    ...(artifactLines.length > 0 ? artifactLines : ["- No upstream artifacts yet."]),
+    ...sections.artifactLines,
     "",
     "Valid consultation targets:",
-    ...(availableConsultationTargets.length > 0 ? availableConsultationTargets.map((item) => `- ${item}`) : ["- None for this phase."]),
+    ...sections.availableConsultationTargets,
     "",
     "Output rules:",
     "- Keep artifacts concise and operational.",
@@ -734,6 +1014,50 @@ function buildCodexAgentPrompt(agent, input, contract, nativeCodex = {}, knownAg
     "- Use blocked only when the run cannot proceed safely.",
     "- Keep consultations and handoffs small and explicit.",
     "- Do not invent new agent ids. Only use the listed consultation targets."
+  ].join("\n");
+}
+
+function buildCursorAgentPrompt(agent, input, contract, nativeCursor = {}, knownAgentIds = []) {
+  const promptControls = normalizePromptControls(nativeCursor.promptControls ?? {});
+  const sections = buildAgentPromptSections(agent, input, contract, promptControls, knownAgentIds);
+
+  return [
+    "You are executing one step in a repository multi-agent runtime.",
+    "Return exactly one raw JSON object and nothing else.",
+    "Do not use markdown fences.",
+    `Agent: ${agent.name} (${agent.role})`,
+    `Phase: ${input.phase}`,
+    `Task: ${input.task}`,
+    `Task summary: ${truncatePromptText(input.summary || "No explicit summary.", promptControls.maxTaskSummaryChars)}`,
+    `Risk: ${input.taskProfile?.risk ?? "low"}`,
+    `Effort: ${input.taskProfile?.effort ?? "low"}`,
+    `Intents: ${(input.taskProfile?.intents ?? []).join(", ") || "implementation"}`,
+    `Attempt: ${input.attempt}`,
+    "",
+    "Allowed actions:",
+    ...sections.allowedActions,
+    "",
+    "Success criteria:",
+    ...sections.successCriteria,
+    "",
+    "Handoff:",
+    ...sections.handoffLines,
+    "",
+    "Recent upstream artifacts:",
+    ...sections.artifactLines,
+    "",
+    "Valid consultation targets:",
+    ...sections.availableConsultationTargets,
+    "",
+    "Output rules:",
+    "- Keep artifacts concise and operational.",
+    "- Use verdict status pass only when the phase is genuinely satisfied.",
+    "- Use needs-rework only when the next owner can fix the issue in one bounded retry.",
+    "- Use blocked only when the run cannot proceed safely.",
+    "- Do not invent new agent ids. Only use the listed consultation targets.",
+    "",
+    "JSON contract:",
+    ...buildCursorAgentJsonContract(contract)
   ].join("\n");
 }
 
@@ -822,57 +1146,76 @@ function mapAgentEffortToCodexReasoning(effort) {
   return "medium";
 }
 
-function runCommand(command, args, stdinBody, cwd) {
-  return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
-    const child = spawn(command, args, {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+function buildAgentPromptSections(agent, input, contract, promptControls, knownAgentIds) {
+  const artifactLines = (input.artifacts ?? [])
+    .slice(-promptControls.maxArtifacts)
+    .map((artifact) => `- ${artifact.kind} | ${truncatePromptText(artifact.title, 80)} | ${truncatePromptText(artifact.summary, promptControls.maxArtifactSummaryChars)}`);
+  const handoffLines = input.handoff
+    ? [
+      `From: ${input.handoff.fromAgentId ?? "unknown"}`,
+      `Reason: ${truncatePromptText(input.handoff.reason ?? "n/a", 180)}`,
+      `Brief: ${truncatePromptText(input.handoff.brief ?? "n/a", 180)}`,
+      ...(Array.isArray(input.handoff.findings) && input.handoff.findings.length > 0
+        ? ["Findings:", ...input.handoff.findings.slice(0, promptControls.maxHandoffFindings).map((item) => `- ${truncatePromptText(item, 160)}`)]
+        : [])
+    ]
+    : ["No explicit handoff was provided."];
+  const allowedActions = (contract.allowedActions ?? []).slice(0, promptControls.maxAllowedActions);
+  const successCriteria = (contract.successCriteria ?? []).slice(0, promptControls.maxSuccessCriteria);
+  const availableConsultationTargets = knownAgentIds
+    .filter((id) => id && id !== agent.id)
+    .slice(0, 8);
 
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({
-        code,
-        stdout,
-        stderr,
-        durationMs: Date.now() - startedAt
-      });
-    });
-
-    child.stdin.write(stdinBody);
-    child.stdin.end();
-  });
-}
-
-function summarizeAttemptUsage(attempts) {
-  const totalTokens = attempts.reduce((sum, attempt) => sum + (extractTokenUsageFromText(attempt.stdout) ?? 0) + (extractTokenUsageFromText(attempt.stderr) ?? 0), 0);
-  const durationMs = attempts.reduce((sum, attempt) => sum + (Number(attempt.durationMs) || 0), 0);
   return {
-    totalTokens: totalTokens > 0 ? totalTokens : null,
-    durationMs
+    artifactLines: artifactLines.length > 0 ? artifactLines : ["- No upstream artifacts yet."],
+    handoffLines,
+    allowedActions: allowedActions.length > 0 ? allowedActions.map((item) => `- ${item}`) : ["- Keep the phase scoped to the contract."],
+    successCriteria: successCriteria.length > 0 ? successCriteria.map((item) => `- ${truncatePromptText(item, 160)}`) : ["- Produce one concise phase result."],
+    availableConsultationTargets: availableConsultationTargets.length > 0
+      ? availableConsultationTargets.map((item) => `- ${item}`)
+      : ["- None for this phase."]
   };
 }
 
-function extractTokenUsageFromText(text) {
-  if (!text) {
-    return null;
-  }
-  const match = text.match(/tokens used\s+([\d,]+)/i);
-  return match ? Number(match[1].replaceAll(",", "")) : null;
+function buildCursorAgentJsonContract(contract) {
+  return [
+    "{",
+    '  "summary": "short sentence",',
+    '  "artifacts": [',
+    "    {",
+    '      "kind": "one of the contract artifact kinds or another short operational kind",',
+    '      "title": "short title",',
+    '      "summary": "short summary",',
+    '      "content": "artifact body",',
+    '      "data": {}',
+    "    }",
+    "  ],",
+    '  "handoffs": [',
+    '    { "to": "existing-agent-id", "reason": "why", "brief": "what next" }',
+    "  ],",
+    '  "consultations": [',
+    '    { "to": "existing-agent-id", "question": "question", "reason": "why needed" }',
+    "  ],",
+    '  "verdict": {',
+    '    "status": "pass | needs-rework | blocked | info",',
+    '    "summary": "short verdict summary",',
+    '    "findings": ["short finding"]',
+    "  }",
+    "}",
+    `Do not return more than ${Math.max(1, (contract.defaultArtifactKinds ?? []).length || 2)} artifact objects.`,
+    "Every top-level key must be present.",
+    "Use [] when a list is empty.",
+    "Use {} for data when there is no structured payload."
+  ];
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function interpolateAgentAdapterArg(arg, values) {
+  return arg
+    .replaceAll("{provider}", values.provider ?? "")
+    .replaceAll("{agentId}", values.agentId ?? "")
+    .replaceAll("{role}", values.role ?? "")
+    .replaceAll("{phase}", values.phase ?? "")
+    .replaceAll("{task}", values.task ?? "");
 }
 
 function normalizePromptControls(promptControls = {}) {

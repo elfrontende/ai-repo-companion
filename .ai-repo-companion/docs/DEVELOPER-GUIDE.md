@@ -69,6 +69,7 @@ The project is intentionally:
 
 - `review-worker.mjs` - queue consumer and review orchestrator
 - `provider-engine.mjs` - provider adapters
+- `external-cli-utils.mjs` - shared native CLI execution and JSON extraction helpers
 - `review-note-engine.mjs` - apply structured note changes
 - `review-normalization-engine.mjs` - normalize model output
 - `review-quality-engine.mjs` - reject weak operations
@@ -86,6 +87,7 @@ The project is intentionally:
 - `policy-tuning-engine.mjs` - tuning suggestions, auto-tune, reconcile
 - `runtime-status-engine.mjs` - `status` and `doctor`
 - `runtime-report-engine.mjs` - compact operator report
+- `host-integration-engine.mjs` - generates Codex/Cursor host integration files
 
 #### Shared utilities
 
@@ -192,6 +194,24 @@ Sequence:
 Main file:
 
 - `src/lib/benchmark-engine.mjs`
+
+## 5. Host integration flow
+
+Entry:
+
+- `node src/cli.mjs integrate --editor both`
+
+Sequence:
+
+1. read the runtime integration config
+2. render Codex host instructions
+3. render Cursor always-apply rules
+4. write a preview pack under `state/integration/host-pack/`
+5. optionally write those files into the real host repository root
+
+Main file:
+
+- `src/lib/host-integration-engine.mjs`
 
 ## How the knowledge graph works
 

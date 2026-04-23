@@ -54,6 +54,7 @@ const execFileAsync = promisify(execFile);
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const packageJson = await readJson(path.resolve("package.json"), {});
 assert.equal(packageJson.scripts?.approve, "node src/cli.mjs approve");
+assert.equal(packageJson.scripts?.integrate, "node src/cli.mjs integrate");
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-"));
 await fs.cp(path.resolve("config"), path.join(tempRoot, "config"), { recursive: true });
@@ -2655,7 +2656,251 @@ const agentCodexCli = await execFileAsync(
 const agentCodexCliPayload = JSON.parse(agentCodexCli.stdout);
 assert.equal(agentCodexCliPayload.mode, "task");
 assert.equal(agentCodexCliPayload.runtimeAgentConfig.nativeCodex.enabled, true);
-assert.equal(agentCodexCliPayload.runtimeAgentConfig.defaultAdapter, "codex-native");
+assert.equal(agentCodexCliPayload.runtimeAgentConfig.defaultAdapter, "provider-runtime");
+
+const agentCursorRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-cursor-"));
+await fs.cp(path.resolve("config"), path.join(agentCursorRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(agentCursorRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(agentCursorRoot, "state"), { recursive: true });
+await ensureWorkspace(agentCursorRoot);
+
+const agentCursorStubPath = path.join(agentCursorRoot, "cursor-agent-stub.mjs");
+await fs.writeFile(agentCursorStubPath, `#!/usr/bin/env node
+const prompt = process.argv.at(-1) ?? "";
+const phaseMatch = prompt.match(/Phase:\\s*(.+)/);
+const agentMatch = prompt.match(/Agent:\\s*(.+)/);
+const phase = phaseMatch ? phaseMatch[1].trim() : "delivery";
+const agent = agentMatch ? agentMatch[1].trim() : "Agent";
+const artifactByPhase = {
+  triage: { kind: "task-brief", title: "Cursor task brief", summary: "Cursor stub planned the run.", content: "- Prepared the task brief.", data: {} },
+  planning: { kind: "acceptance-criteria", title: "Cursor acceptance criteria", summary: "Cursor stub clarified scope.", content: "- Clarified scope and acceptance criteria.", data: {} },
+  design: { kind: "design-note", title: "Cursor design note", summary: "Cursor stub prepared a design note.", content: "- Captured the design boundaries.", data: {} },
+  delivery: { kind: "change-plan", title: "Cursor change plan", summary: "Cursor stub prepared the delivery plan.", content: "- Prepared the implementation slice.", data: {} },
+  verification: { kind: agent.includes("Security") ? "security-review" : "verification-report", title: "Cursor verification", summary: "Cursor stub verified the phase.", content: "- Verification and rollback guidance look sufficient.", data: {} },
+  consolidation: { kind: "final-decision", title: "Cursor final decision", summary: "Cursor stub consolidated the run.", content: "- Consolidated the run for finalization.", data: {} },
+  "memory-capture": { kind: "sync-brief", title: "Cursor sync brief", summary: "Cursor stub captured the memory sync brief.", content: "- Captured the durable run summary.", data: {} }
+};
+const verdictStatus = phase === "verification" ? "pass" : "info";
+console.log(JSON.stringify({
+  summary: "Cursor stub generated a structured agent step output.",
+  artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
+  handoffs: [],
+  consultations: [
+    {
+      to: "memory-curator",
+      question: "Confirm the durable memory boundary before the next phase.",
+      reason: "Synthetic valid consultation target."
+    },
+    {
+      to: "not-a-real-agent",
+      question: "Need extra context before proceeding.",
+      reason: "Synthetic invalid consultation target."
+    }
+  ],
+  verdict: {
+    status: verdictStatus,
+    summary: verdictStatus === "pass" ? "Cursor stub passed the verification step." : "Cursor stub completed the phase.",
+    findings: []
+  }
+}, null, 2));
+`, "utf8");
+await fs.chmod(agentCursorStubPath, 0o755);
+
+const agentCursorConfig = await readJson(path.join(agentCursorRoot, "config/system.json"), {});
+agentCursorConfig.multiAgentRuntime = {
+  ...(agentCursorConfig.multiAgentRuntime ?? {}),
+  defaultAdapter: "provider-runtime",
+  liveProvider: "cursor",
+  providerByAgentProvider: {
+    default: "cursor",
+    claude: "cursor",
+    gemini: "cursor",
+    codex: "cursor",
+    cursor: "cursor"
+  },
+  nativeCursor: {
+    ...(agentCursorConfig.multiAgentRuntime?.nativeCursor ?? {}),
+    enabled: true,
+    binary: agentCursorStubPath,
+    model: "cursor-stub-model",
+    retryBackoffMs: 0
+  }
+};
+await writeJson(path.join(agentCursorRoot, "config/system.json"), agentCursorConfig);
+
+const agentCursorRun = await runTaskFlow(agentCursorRoot, agentCursorConfig, {
+  task: "tighten deployment README wording and remove repeated guidance",
+  summary: "Let the cursor-backed multi-agent runtime process a routine docs task."
+});
+assert.equal(agentCursorRun.orchestration.rolloutMode, "active");
+const agentCursorSurface = await readTaskRunSurface(agentCursorRoot, agentCursorRun.run.id);
+assert.equal(agentCursorSurface.available, true);
+assert.ok(agentCursorSurface.agentRuns.total >= 4);
+assert.ok(agentCursorSurface.agentRuns.items.every((item) => item.output.adapter === "cursor-native"));
+assert.ok(agentCursorSurface.agentRuns.items.every((item) => item.output.attempts.length >= 1));
+assert.ok(agentCursorSurface.agentRuns.items.every((item) => item.output.normalization.consultationsDropped >= 1));
+
+const agentCursorCli = await execFileAsync(
+  "node",
+  [
+    "src/cli.mjs",
+    "task",
+    "--task",
+    "tighten deployment README wording and remove repeated guidance",
+    "--summary",
+    "Drive the cursor agent runtime through the CLI.",
+    "--agentLive",
+    "--agentProvider",
+    "cursor",
+    "--agentBinary",
+    agentCursorStubPath
+  ],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: agentCursorRoot
+    }
+  }
+);
+const agentCursorCliPayload = JSON.parse(agentCursorCli.stdout);
+assert.equal(agentCursorCliPayload.mode, "task");
+assert.equal(agentCursorCliPayload.runtimeAgentConfig.nativeCursor.enabled, true);
+assert.equal(agentCursorCliPayload.runtimeAgentConfig.defaultAdapter, "provider-runtime");
+
+const agentCommandRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-agent-command-"));
+await fs.cp(path.resolve("config"), path.join(agentCommandRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(agentCommandRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(agentCommandRoot, "state"), { recursive: true });
+await ensureWorkspace(agentCommandRoot);
+
+const agentCommandStubPath = path.join(agentCommandRoot, "command-agent-stub.mjs");
+await fs.writeFile(agentCommandStubPath, `#!/usr/bin/env node
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+  const payload = JSON.parse(raw);
+  const phase = payload.input?.phase ?? "delivery";
+  const artifactByPhase = {
+    triage: { kind: "task-brief", title: "Command task brief", summary: "Command stub planned the run.", content: "- Prepared the task brief.", data: {} },
+    planning: { kind: "acceptance-criteria", title: "Command acceptance criteria", summary: "Command stub clarified scope.", content: "- Clarified scope and acceptance criteria.", data: {} },
+    design: { kind: "design-note", title: "Command design note", summary: "Command stub prepared a design note.", content: "- Captured the design boundaries.", data: {} },
+    delivery: { kind: "change-plan", title: "Command change plan", summary: "Command stub prepared the delivery plan.", content: "- Prepared the implementation slice.", data: {} },
+    verification: { kind: "verification-report", title: "Command verification", summary: "Command stub verified the phase.", content: "- Verification and rollback guidance look sufficient.", data: {} },
+    consolidation: { kind: "final-decision", title: "Command final decision", summary: "Command stub consolidated the run.", content: "- Consolidated the run for finalization.", data: {} },
+    "memory-capture": { kind: "sync-brief", title: "Command sync brief", summary: "Command stub captured the memory sync brief.", content: "- Captured the durable run summary.", data: {} }
+  };
+  const verdictStatus = phase === "verification" ? "pass" : "info";
+  process.stdout.write(JSON.stringify({
+    summary: "Command stub generated a structured agent step output.",
+    artifacts: [artifactByPhase[phase] ?? artifactByPhase.delivery],
+    handoffs: [],
+    consultations: payload.knownAgentIds?.includes("memory-curator")
+      ? [{ to: "memory-curator", question: "Confirm the durable memory boundary before the next phase.", reason: "Synthetic valid consultation target." }]
+      : [],
+    verdict: {
+      status: verdictStatus,
+      summary: verdictStatus === "pass" ? "Command stub passed the verification step." : "Command stub completed the phase.",
+      findings: []
+    }
+  }));
+});
+process.stdin.resume();
+`, "utf8");
+await fs.chmod(agentCommandStubPath, 0o755);
+
+const agentCommandConfig = await readJson(path.join(agentCommandRoot, "config/system.json"), {});
+agentCommandConfig.multiAgentRuntime = {
+  ...(agentCommandConfig.multiAgentRuntime ?? {}),
+  defaultAdapter: "provider-runtime",
+  liveProvider: "external",
+  providerByAgentProvider: {
+    default: "external",
+    claude: "external",
+    gemini: "external",
+    codex: "external",
+    cursor: "external"
+  },
+  commandAdapters: {
+    ...(agentCommandConfig.multiAgentRuntime?.commandAdapters ?? {}),
+    external: {
+      enabled: true,
+      command: "node",
+      args: [agentCommandStubPath]
+    }
+  }
+};
+await writeJson(path.join(agentCommandRoot, "config/system.json"), agentCommandConfig);
+
+const agentCommandRun = await runTaskFlow(agentCommandRoot, agentCommandConfig, {
+  task: "tighten deployment README wording and remove repeated guidance",
+  summary: "Let the command-backed multi-agent runtime process a routine docs task."
+});
+assert.equal(agentCommandRun.orchestration.rolloutMode, "active");
+const agentCommandSurface = await readTaskRunSurface(agentCommandRoot, agentCommandRun.run.id);
+assert.equal(agentCommandSurface.available, true);
+assert.ok(agentCommandSurface.agentRuns.total >= 4);
+assert.ok(agentCommandSurface.agentRuns.items.every((item) => item.output.adapter === "command"));
+assert.ok(agentCommandSurface.agentRuns.items.every((item) => item.output.attempts.length === 1));
+
+const integratePreviewRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-integrate-preview-"));
+await fs.cp(path.resolve("config"), path.join(integratePreviewRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(integratePreviewRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(integratePreviewRoot, "state"), { recursive: true });
+await ensureWorkspace(integratePreviewRoot);
+
+const integratePreviewCli = await execFileAsync(
+  "node",
+  ["src/cli.mjs", "integrate", "--editor", "both"],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: integratePreviewRoot
+    }
+  }
+);
+const integratePreviewPayload = JSON.parse(integratePreviewCli.stdout);
+assert.equal(integratePreviewPayload.mode, "integrate");
+assert.equal(integratePreviewPayload.integration.editor, "both");
+const integrationPackRoot = path.join(integratePreviewRoot, "state/integration/host-pack");
+const integrationManifest = await readJson(path.join(integrationPackRoot, "manifest.json"), null);
+assert.equal(integrationManifest.editor, "both");
+assert.equal(integrationManifest.writeHostFiles, false);
+assert.ok(integrationManifest.files.some((file) => file.relativePath === "AGENTS.md"));
+assert.ok(integrationManifest.files.some((file) => file.relativePath === ".cursor/rules/ai-repo-companion.mdc"));
+const previewAgents = await fs.readFile(path.join(integrationPackRoot, "AGENTS.md"), "utf8");
+const previewCursorRule = await fs.readFile(path.join(integrationPackRoot, ".cursor/rules/ai-repo-companion.mdc"), "utf8");
+assert.match(previewAgents, /AI Repo Companion Host Instructions/);
+assert.match(previewCursorRule, /alwaysApply: true/);
+
+const hostRepoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-integrate-host-"));
+const integrateHostCli = await execFileAsync(
+  "node",
+  [
+    "src/cli.mjs",
+    "integrate",
+    "--editor",
+    "both",
+    "--hostRoot",
+    hostRepoRoot,
+    "--writeHostFiles"
+  ],
+  {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      AI_REPO_COMPANION_ROOT: integratePreviewRoot
+    }
+  }
+);
+const integrateHostPayload = JSON.parse(integrateHostCli.stdout);
+assert.equal(integrateHostPayload.integration.writeHostFiles, true);
+const hostAgents = await fs.readFile(path.join(hostRepoRoot, "AGENTS.md"), "utf8");
+const hostCursorRule = await fs.readFile(path.join(hostRepoRoot, ".cursor/rules/ai-repo-companion.mdc"), "utf8");
+assert.match(hostAgents, /run companion commands from `\.ai-repo-companion\/`/);
+assert.match(hostCursorRule, /Use AI Repo Companion as the repository memory/);
 
 const cursorStubDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-cursor-stub-"));
 const cursorStubPath = path.join(cursorStubDir, "cursor-stub.mjs");

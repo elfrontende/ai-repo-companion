@@ -128,6 +128,26 @@ npm test
 
 If both work, the local workspace is ready.
 
+### 5. Generate host editor instructions
+
+If the host repository will be used from Codex, Cursor, or both, generate the host-facing files:
+
+```bash
+npm run integrate -- --editor both
+```
+
+To write them directly into the host repository root:
+
+```bash
+npm run integrate -- --editor both --hostRoot .. --writeHostFiles
+```
+
+That produces:
+
+- `AGENTS.md` for Codex
+- `.cursor/rules/ai-repo-companion.mdc` for Cursor auto-load
+- a preview pack in `state/integration/host-pack/`
+
 ## Everyday usage
 
 ## The simplest path
@@ -184,6 +204,39 @@ npm run task -- \
 ```
 
 That uses the configured live provider path for the current runtime.
+
+## Live multi-agent runtime
+
+If you want the multi-agent execution graph to call a live provider for each step:
+
+```bash
+npm run task -- \
+  --task "tighten deployment README wording" \
+  --summary "Drive the live multi-agent runtime" \
+  --agentLive \
+  --agentProvider codex
+```
+
+Cursor works the same way:
+
+```bash
+npm run task -- \
+  --task "tighten deployment README wording" \
+  --summary "Drive the live multi-agent runtime" \
+  --agentLive \
+  --agentProvider cursor
+```
+
+For non-native backends, configure `multiAgentRuntime.commandAdapters` and use:
+
+```bash
+npm run task -- \
+  --task "tighten deployment README wording" \
+  --summary "Drive the live multi-agent runtime" \
+  --agentLive \
+  --agentProvider external \
+  --agentCommandProvider external
+```
 
 ## Cost control examples
 
