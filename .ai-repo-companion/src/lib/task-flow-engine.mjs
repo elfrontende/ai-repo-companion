@@ -5,6 +5,7 @@ import { syncMemory } from "./memory-engine.mjs";
 import { applyMemoryPolicyOutcome, evaluateMemoryPolicy } from "./policy-engine.mjs";
 import { processReviewQueue } from "./review-worker.mjs";
 import { completeTaskRun, failTaskRun, startTaskRun, updateTaskRun } from "./run-engine.mjs";
+import { runOrchestratedTask } from "./orchestrator-engine.mjs";
 
 // This module provides the first end-to-end "finish a task" flow.
 // Before this file existed, callers had to manually compose:
@@ -52,12 +53,35 @@ export async function runTaskFlow(rootDir, config, options = {}) {
       note: "Assembled bounded context for the task."
     });
 
+    const orchestration = await runOrchestratedTask(rootDir, config, {
+      runId: run.id,
+      task,
+      summary,
+      artifacts,
+      taskProfile,
+      plan,
+      contextBundle
+    });
+    run = await updateTaskRun(rootDir, run.id, {
+      multiAgent: {
+        enabled: orchestration.enabled,
+        rolloutMode: orchestration.rolloutMode,
+        status: orchestration.status,
+        finalVerdict: orchestration.finalVerdict
+      }
+    }, {
+      stage: "multi-agent-executed",
+      note: "Executed the multi-agent runtime for the task."
+    });
+
     const syncResult = await syncMemory(
       rootDir,
       {
         task,
-        summary,
-        artifacts
+        summary: orchestration.memoryCapture?.summary ?? summary,
+        artifacts: orchestration.memoryCapture?.kind
+          ? uniqueArtifacts([...(artifacts ?? []), orchestration.memoryCapture.kind])
+          : artifacts
       },
       config
     );
@@ -76,6 +100,7 @@ export async function runTaskFlow(rootDir, config, options = {}) {
       taskProfile,
       plan,
       contextBundle,
+      orchestration,
       memoryPolicy,
       sync: syncResult,
       policyOutcome
@@ -160,4 +185,8 @@ function summarizeRun(run, runPath) {
     failedAt: run.failedAt ?? null,
     runPath
   };
+}
+
+function uniqueArtifacts(values = []) {
+  return [...new Set(values.filter(Boolean))];
 }
