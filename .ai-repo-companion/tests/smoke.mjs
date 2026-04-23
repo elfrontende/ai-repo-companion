@@ -178,6 +178,119 @@ assert.ok(firstMetrics.cost.estimatedContextTokens > 0);
 assert.equal(firstMetrics.cost.liveTokensUsed, 0);
 assert.ok(firstMetrics.cost.avgEstimatedContextTokensPerRun > 0);
 
+const commandAdapterRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-command-adapter-"));
+await fs.cp(path.resolve("config"), path.join(commandAdapterRoot, "config"), { recursive: true });
+await fs.cp(path.resolve("notes"), path.join(commandAdapterRoot, "notes"), { recursive: true });
+await fs.cp(path.resolve("state"), path.join(commandAdapterRoot, "state"), { recursive: true });
+await ensureWorkspace(commandAdapterRoot);
+
+const commandAdapterScriptPath = path.join(commandAdapterRoot, "mock-review-provider.mjs");
+await fs.writeFile(commandAdapterScriptPath, [
+  "let raw = '';",
+  "process.stdin.setEncoding('utf8');",
+  "process.stdin.on('data', (chunk) => { raw += chunk; });",
+  "process.stdin.on('end', () => {",
+  "  const payload = JSON.parse(raw);",
+  "  const noteId = payload.contextBundle?.selectedNotes?.[0]?.id ?? '';",
+  "  const response = {",
+  "    summary: 'Synthetic command adapter output.',",
+  "    operations: [",
+  "      {",
+  "        type: 'append_note_update',",
+  "        noteId,",
+  "        sourceNoteId: '',",
+  "        targetNoteId: '',",
+  "        title: '',",
+  "        kind: '',",
+  "        summary: 'Command adapter normalized a queued review into a structured note update.',",
+  "        signals: [",
+  "          'Command adapter returned valid JSON',",
+  "          'Local pipeline parsed stdout into operations'",
+  "        ],",
+  "        tagsToAdd: ['command-adapter', 'structured-output'],",
+  "        linksToAdd: [],",
+  "        tags: [],",
+  "        links: []",
+  "      }",
+  "    ]",
+  "  };",
+  "  process.stdout.write(JSON.stringify(response));",
+  "});",
+  "process.stdin.resume();"
+].join("\n"), "utf8");
+
+const commandAdapterConfig = await readJson(path.join(commandAdapterRoot, "config/system.json"), {});
+for (const seedPayload of [
+  {
+    task: "refresh the README deployment section wording",
+    summary: "Tightened one deployment paragraph.",
+    artifacts: ["docs"]
+  },
+  {
+    task: "rewrite deployment guide wording for clarity",
+    summary: "Aligned terminology across the deployment guide.",
+    artifacts: ["docs"]
+  }
+]) {
+  const seedProfile = classifyTask(seedPayload.task);
+  const seedDecision = await evaluateMemoryPolicy(commandAdapterRoot, seedProfile, commandAdapterConfig);
+  const seedSync = await syncMemory(commandAdapterRoot, seedPayload, commandAdapterConfig);
+  await applyMemoryPolicyOutcome(commandAdapterRoot, seedDecision, seedProfile, seedSync, commandAdapterConfig);
+}
+
+const commandProfile = classifyTask("polish the deployment README wording and remove repeated guidance");
+const commandDecision = await evaluateMemoryPolicy(commandAdapterRoot, commandProfile, commandAdapterConfig);
+assert.equal(commandDecision.mode, "balanced");
+const commandSync = await syncMemory(
+  commandAdapterRoot,
+  {
+    task: "polish the deployment README wording and remove repeated guidance",
+    summary: "Collapsed duplicated phrasing in the deployment docs.",
+    artifacts: ["docs", "readme"]
+  },
+  commandAdapterConfig
+);
+const commandOutcome = await applyMemoryPolicyOutcome(commandAdapterRoot, commandDecision, commandProfile, commandSync, commandAdapterConfig);
+assert.ok(commandOutcome.queuedJob);
+
+const commandReviewRun = await processReviewQueue(commandAdapterRoot, commandAdapterConfig, {
+  maxJobs: 1,
+  reviewConfig: {
+    ...commandAdapterConfig,
+    reviewExecution: {
+      ...commandAdapterConfig.reviewExecution,
+      valueGate: {
+        ...(commandAdapterConfig.reviewExecution?.valueGate ?? {}),
+        minScore: 1
+      },
+      commandAdapters: {
+        ...(commandAdapterConfig.reviewExecution?.commandAdapters ?? {}),
+        cursor: {
+          enabled: true,
+          command: "node",
+          args: [commandAdapterScriptPath]
+        }
+      }
+    }
+  }
+});
+
+assert.equal(commandReviewRun.processedCount, 1);
+assert.equal(commandReviewRun.processed[0].adapter, "command");
+const commandQueue = await inspectReviewQueue(commandAdapterRoot);
+assert.equal(commandQueue.completed, 1);
+const commandReport = await readJson(commandQueue.jobs[0].reportPath, null);
+assert.equal(commandReport.execution.adapter, "command");
+assert.equal(commandReport.execution.status, "completed");
+assert.equal(Array.isArray(commandReport.execution.output.parsed.operations), true);
+assert.equal(commandReport.execution.output.parsed.operations.length, 1);
+assert.equal(commandReport.noteChanges.applied.length, 1);
+
+const commandNotes = await loadNotes(commandAdapterRoot);
+const commandTouchedNote = commandNotes.find((note) => note.id === commandSync.touchedNoteId);
+assert.ok(commandTouchedNote.body.includes("Review Update"));
+assert.ok(commandTouchedNote.tags.includes("command-adapter"));
+
 const valueGateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ai-repo-companion-value-gate-"));
 await fs.cp(path.resolve("config"), path.join(valueGateRoot, "config"), { recursive: true });
 await fs.cp(path.resolve("notes"), path.join(valueGateRoot, "notes"), { recursive: true });
