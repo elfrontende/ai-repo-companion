@@ -281,6 +281,10 @@ async function runBoundedRework(rootDir, config, payload, phaseGraph, verificati
       blocked = true;
       break;
     }
+    if (rollout.requireWritableOwnerForRework && !hasWritableOwnership(ownerAgent)) {
+      blocked = true;
+      break;
+    }
 
     const retryRecord = await recordRunRetryRequest(rootDir, payload.runId, {
       phase: ownerPhase.id,
@@ -364,11 +368,11 @@ async function maybeCreateHandoff(rootDir, runId, phase, agent, state, options =
 }
 
 function pickRecommendedOwner(agents, verifierPhaseId) {
-  const preferred = agents.find((agent) => agent.role === "implementation")
-    ?? agents.find((agent) => agent.role === "documentation")
-    ?? agents.find((agent) => agent.role === "migration")
-    ?? agents.find((agent) => agent.role === "planning")
-    ?? agents.find((agent) => agent.role === "routing");
+  const preferred = agents.find((agent) => hasWritableOwnership(agent) && agent.role === "implementation")
+    ?? agents.find((agent) => hasWritableOwnership(agent) && agent.role === "documentation")
+    ?? agents.find((agent) => hasWritableOwnership(agent) && agent.role === "migration")
+    ?? agents.find((agent) => hasWritableOwnership(agent) && agent.role === "planning")
+    ?? agents.find((agent) => hasWritableOwnership(agent));
   return preferred?.id ?? null;
 }
 
@@ -407,6 +411,11 @@ function normalizeRuntimeConfig(config) {
   return {
     enabled: config.enabled !== false,
     rolloutMode: config.rolloutMode ?? "active",
-    maxReworkLoops: Math.max(1, Number(config.maxReworkLoops) || 2)
+    maxReworkLoops: Math.max(1, Number(config.maxReworkLoops) || 2),
+    requireWritableOwnerForRework: config.requireWritableOwnerForRework !== false
   };
+}
+
+function hasWritableOwnership(agent) {
+  return Array.isArray(agent?.ownership?.writeScopes) && agent.ownership.writeScopes.length > 0;
 }

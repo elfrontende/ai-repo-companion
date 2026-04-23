@@ -257,14 +257,8 @@ function tokenVariants(token) {
   const normalized = token.trim().toLowerCase();
   const variants = [normalized];
 
-  if (normalized.length > 4) {
-    variants.push(normalized.slice(0, -1));
-  }
   if (normalized.length > 5) {
-    variants.push(normalized.slice(0, -2));
-  }
-  if (normalized.length > 7) {
-    variants.push(normalized.slice(0, -3));
+    variants.push(normalized.slice(0, -1));
   }
 
   return [...new Set(variants.filter((value) => value.length >= 3))];

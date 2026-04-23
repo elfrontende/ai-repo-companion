@@ -460,9 +460,43 @@ export async function processReviewQueue(rootDir, config, options = {}) {
       job.status = "failed";
       job.finishedAt = new Date().toISOString();
       job.error = error.message;
+      const reportPath = await persistReviewReportWithJobSnapshot(rootDir, job, {
+        payload: {
+          job,
+          contextBundle: null
+        },
+        execution: {
+          provider: job.execution?.provider ?? "unknown",
+          adapter: job.execution?.adapter ?? "unknown",
+          status: "failed",
+          output: {
+            reason: error.message,
+            usage: {
+              totalTokens: 0,
+              durationMs: 0
+            }
+          }
+        },
+        noteChanges: {
+          applied: [],
+          skipped: [],
+          reason: error.message
+        },
+        finishedAt: job.finishedAt
+      }, {
+        status: "failed",
+        finishedAt: job.finishedAt,
+        execution: {
+          provider: job.execution?.provider ?? "unknown",
+          adapter: job.execution?.adapter ?? "unknown",
+          status: "failed"
+        }
+      });
+      job.reportPath = reportPath;
       processed.push({
         id: job.id,
         status: "failed",
+        reportPath: job.reportPath,
         error: error.message
       });
       await recordReviewMetricsEvent(rootDir, {

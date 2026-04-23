@@ -136,6 +136,10 @@ export async function applyApprovalExpiryPolicy(rootDir, queue, historyPath, con
     }
 
     if (report) {
+      report.job = {
+        ...(report.job ?? job),
+        ...job
+      };
       report.noteChanges = {
         ...(report.noteChanges ?? {}),
         approval: {
@@ -248,6 +252,10 @@ export async function approveReviewJob(rootDir, jobId, config = {}) {
   };
   report.recovery = recovery;
   report.finishedAt = timestamp;
+  report.job = {
+    ...(report.job ?? job),
+    ...job
+  };
 
   await writeJson(job.reportPath, report);
   await writeJson(queuePath, queue);
