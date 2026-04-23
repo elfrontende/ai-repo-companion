@@ -90,6 +90,20 @@ const memoryPolicy = await evaluateMemoryPolicy(tempRoot, taskProfile, config);
 assert.equal(memoryPolicy.mode, "expensive");
 assert.ok(memoryPolicy.shouldQueueReview);
 
+const flakyApiProfile = classifyTask("investigate flaky regression in API retries");
+assert.equal(flakyApiProfile.risk, "medium");
+assert.equal(flakyApiProfile.effort, "medium");
+assert.equal(flakyApiProfile.intents.includes("memory"), false);
+assert.equal(flakyApiProfile.intents[0], "verification");
+
+const authRolloutProfile = classifyTask("plan a safe auth migration rollout");
+assert.equal(authRolloutProfile.intents[0], "planning");
+assert.equal(authRolloutProfile.risk, "high");
+
+const ukrainianMigrationPlanProfile = classifyTask("спланувати безпечну міграцію auth схеми");
+assert.equal(ukrainianMigrationPlanProfile.intents[0], "planning");
+assert.equal(ukrainianMigrationPlanProfile.risk, "high");
+
 const notes = await loadNotes(tempRoot);
 const context = assembleContext("optimize context retrieval with atomic notes", notes, {
   tokenBudget: 500,
