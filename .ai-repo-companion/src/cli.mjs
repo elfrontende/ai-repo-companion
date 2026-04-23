@@ -206,6 +206,7 @@ async function runReport() {
 async function runBenchmark(args = {}) {
   const iterations = Math.max(1, Number(args.iterations) || 1);
   const suite = args.suite ?? "mixed";
+  const corpusMode = args.corpus ?? args.corpusMode ?? "real";
   return {
     rootDir,
     mode: "benchmark",
@@ -213,9 +214,10 @@ async function runBenchmark(args = {}) {
       ? await runSyntheticBenchmarkCycle(rootDir, {
         iterations,
         autoTuneBetweenRuns: args.autoTuneBetweenRuns === true,
-        suite
+        suite,
+        corpusMode
       })
-      : await runSyntheticBenchmark(rootDir, systemConfig, { suite })
+      : await runSyntheticBenchmark(rootDir, systemConfig, { suite, corpusMode })
   };
 }
 
@@ -383,6 +385,8 @@ function helpText() {
       "node src/cli.mjs report --format html",
       "node src/cli.mjs report --format html --output ./runtime-report.html",
       "node src/cli.mjs benchmark",
+      "node src/cli.mjs benchmark --corpus real",
+      "node src/cli.mjs benchmark --corpus synthetic-noise",
       "node src/cli.mjs benchmark --suite low-risk",
       "node src/cli.mjs benchmark --suite high-risk",
       "node src/cli.mjs benchmark --iterations 5 --autoTuneBetweenRuns",

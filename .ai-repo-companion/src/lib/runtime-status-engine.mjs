@@ -100,13 +100,13 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     findings.push({
       severity: "info",
       code: "benchmark-missing",
-      message: "No synthetic benchmark report exists yet. Run `benchmark` before trusting cost recommendations."
+      message: "No benchmark report exists yet. Run `benchmark` before trusting cost recommendations."
     });
   } else if (benchmarkSummary.isStale) {
     findings.push({
       severity: "warning",
       code: "benchmark-stale",
-      message: "The last synthetic benchmark is stale. Refresh it before changing runtime cost defaults."
+      message: "The last benchmark report is stale. Refresh it before changing runtime cost defaults."
     });
   }
 
@@ -114,7 +114,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     findings.push({
       severity: "info",
       code: "benchmark-confidence-low",
-      message: `Synthetic benchmark confidence is low: ${benchmarkSummary.confidence.reasons?.[0] ?? "benchmark evidence is still thin"}.`
+      message: `Benchmark confidence is low: ${benchmarkSummary.confidence.reasons?.[0] ?? "benchmark evidence is still thin"}.`
     });
   }
 
@@ -145,7 +145,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     findings.push({
       severity: "info",
       code: "balanced-lane-heavier-than-benchmark",
-      message: "Synthetic benchmark says saver is cheaper, but balanced reasoning effort is still above the lean lane. Run `tune --auto` or lower the balanced profile manually."
+      message: "Benchmark evidence says saver is cheaper, but balanced reasoning effort is still above the lean lane. Run `tune --auto` or lower the balanced profile manually."
     });
   }
 
@@ -153,7 +153,7 @@ export async function runRuntimeDoctor(rootDir, config = {}) {
     findings.push({
       severity: "info",
       code: "auto-tune-stale",
-      message: "Synthetic benchmark favors the saver lane, but the last auto-tune is stale. Consider running `tune --auto` again."
+      message: "Benchmark evidence favors the saver lane, but the last auto-tune is stale. Consider running `tune --auto` again."
     });
   }
 
@@ -318,12 +318,33 @@ async function readBenchmarkSummary(rootDir, config = {}, metrics = null) {
     generatedAt,
     ageMinutes,
     isStale: ageMinutes > freshnessMinutes,
+    corpusMode: benchmark?.corpusMode ?? "real",
+    inputCorpus: benchmark?.inputCorpus ?? {
+      noteCount: 0,
+      totalTokens: 0,
+      noiseNotesAdded: 0,
+      realNoteCount: 0,
+      realTotalTokens: 0
+    },
     cheapestVariant: benchmark?.aggregate?.cheapestVariant ?? null,
     balancedReductionPercent: benchmark?.aggregate?.byVariant?.balanced?.reductionPercent ?? null,
     saverReductionPercent: benchmark?.aggregate?.byVariant?.saver?.reductionPercent ?? null,
     domainDiagnostics,
     topWasteDomains,
     safeSavingsOpportunities,
+    realCorpusCheck: benchmark?.realCorpusCheck ?? {
+      noteCount: 0,
+      totalTokens: 0,
+      taskCount: 0,
+      averageSelectedNotes: 0,
+      averageContextTokens: 0,
+      averageReductionPercent: 0,
+      emptyContextTasks: 0,
+      fullCorpusTasks: 0,
+      totalTokensSaved: 0,
+      reductionPercent: 0,
+      tasks: []
+    },
     domainTrend: benchmark?.trend?.byDomain ?? {},
     confidence: benchmark?.trend?.confidence ?? {
       score: 0,
@@ -347,6 +368,7 @@ async function readBenchmarkCycleSummary(rootDir, config = {}) {
     ageMinutes,
     isStale: ageMinutes > freshnessMinutes,
     suite: benchmarkCycle?.suite ?? "mixed",
+    corpusMode: benchmarkCycle?.corpusMode ?? "real",
     iterations: benchmarkCycle?.iterations ?? 0,
     autoTuneBetweenRuns: benchmarkCycle?.autoTuneBetweenRuns === true,
     latestOutcome: multiCycle.latestOutcome ?? benchmarkCycle?.summary?.outcome ?? null,
@@ -533,11 +555,11 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
     actions.push({
       priority: 100,
       action: "node src/cli.mjs benchmark",
-      reason: "No synthetic benchmark exists yet, so tuning and cost guidance are still blind.",
+      reason: "No benchmark evidence exists yet, so tuning and cost guidance are still blind.",
       evidenceScore: 95,
       evidenceBand: inferEvidenceBand(95),
       riskLevel: "low",
-      expectedOutcome: "Creates the missing synthetic cost baseline for every later tuning and rollback decision.",
+      expectedOutcome: "Creates the missing benchmark baseline for every later tuning and rollback decision.",
       impactSummary: "Unblocks every later cost recommendation with a fresh baseline.",
       whyNow: "Benchmark data is the prerequisite for nearly every bounded tuning or rollback decision."
     });
@@ -545,7 +567,7 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
     actions.push({
       priority: 95,
       action: "node src/cli.mjs benchmark",
-      reason: "The last synthetic benchmark is stale, so current cost recommendations may be misleading.",
+      reason: "The last benchmark report is stale, so current cost recommendations may be misleading.",
       evidenceScore: 86,
       evidenceBand: inferEvidenceBand(86),
       riskLevel: "low",
@@ -640,11 +662,11 @@ function buildRuntimeNextActions(queue, costSummary, benchmarkSummary, benchmark
     actions.push({
       priority: 70,
       action: "node src/cli.mjs tune --auto",
-      reason: "Saver keeps winning synthetic cost checks, but the last auto-tune is stale.",
+      reason: "Saver keeps winning recent benchmark checks, but the last auto-tune is stale.",
       evidenceScore: 68,
       evidenceBand: inferEvidenceBand(68),
       riskLevel: "medium",
-      expectedOutcome: "Refreshes bounded policy changes so the runtime keeps tracking the cheaper synthetic lane.",
+      expectedOutcome: "Refreshes bounded policy changes so the runtime keeps tracking the cheaper lane.",
       impactSummary: "Refreshes stale tuning so the cheaper balanced lane remains the default.",
       whyNow: "The system already has a stable cheaper lane, so refreshing bounded auto-tune is more useful than manual tweaking."
     });
@@ -706,7 +728,7 @@ function buildDoctorRecommendedActions(findings) {
     findings.some((item) => ["benchmark-missing", "benchmark-stale", "benchmark-cycle-missing", "benchmark-cycle-stale", "benchmark-cycle-degrading"].includes(item.code)),
     100,
     "node src/cli.mjs benchmark --iterations 3 --autoTuneBetweenRuns",
-    "Refresh synthetic benchmark evidence before trusting longer-run runtime recommendations."
+    "Refresh benchmark evidence before trusting longer-run runtime recommendations."
   );
   push(
     findings.some((item) => item.code === "post-tune-benchmark-degraded" || item.code === "canary-pending-reconcile"),
@@ -761,7 +783,7 @@ function buildRuntimeCompactSummary(queue, metrics, costSummary, benchmarkSummar
     whyConfident: benchmarkCycleSummary.confidence?.level === "high"
       ? `Long-run cycle confidence is high because ${benchmarkCycleSummary.confidence.reasons?.[0] ?? "the recent benchmark windows are stable"}.`
       : benchmarkSummary.confidence?.level === "high"
-        ? `Benchmark confidence is high because ${benchmarkSummary.confidence.reasons?.[0] ?? "the synthetic trend is stable"}.`
+        ? `Benchmark confidence is high because ${benchmarkSummary.confidence.reasons?.[0] ?? "the recent benchmark trend is stable"}.`
         : `Confidence is still ${benchmarkCycleSummary.confidence?.level ?? benchmarkSummary.confidence?.level ?? "low"} because ${benchmarkCycleSummary.confidence?.reasons?.[0] ?? benchmarkSummary.confidence?.reasons?.[0] ?? "recent benchmark evidence is thin or noisy"}.`,
     whyNotTuneHarder: benchmarkSummary.domainDiagnostics.some((item) => item.isNoisy)
       ? "At least one cheap domain is still noisy, so aggressive tightening would overreact to unstable benchmark evidence."
