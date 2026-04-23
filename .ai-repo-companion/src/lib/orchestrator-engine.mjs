@@ -7,6 +7,8 @@ import {
   recordRunRetryRequest,
   recordRunVerdict,
   startAgentRun,
+  updateRunHandoff,
+  updateRunRetryRequest,
   updateTaskRun
 } from "./run-engine.mjs";
 
@@ -14,6 +16,34 @@ export async function runOrchestratedTask(rootDir, config, payload = {}) {
   const runId = payload.runId;
   const rollout = normalizeRuntimeConfig(config.multiAgentRuntime ?? {});
   const phaseGraph = buildPhaseGraph(payload.plan?.agents ?? [], payload.taskProfile ?? {});
+
+  if (!rollout.enabled) {
+    const run = await updateTaskRun(rootDir, runId, {
+      phaseGraph,
+      multiAgent: {
+        enabled: false,
+        rolloutMode: "disabled",
+        status: "disabled",
+        currentPhase: null,
+        finalVerdict: {
+          status: "info",
+          summary: "Multi-agent execution is disabled for this run."
+        }
+      }
+    }, {
+      stage: "multi-agent-disabled",
+      note: "Skipped multi-agent execution because the runtime is disabled."
+    });
+    return {
+      enabled: false,
+      rolloutMode: "disabled",
+      status: "disabled",
+      phaseGraph,
+      finalVerdict: run.multiAgent?.finalVerdict ?? null,
+      memoryCapture: null,
+      run
+    };
+  }
 
   await updateTaskRun(rootDir, runId, {
     phaseGraph,
@@ -96,7 +126,9 @@ export async function runOrchestratedTask(rootDir, config, payload = {}) {
   const finalVerdict = chooseFinalVerdict(run?.verdicts ?? []);
   const finalRun = await updateTaskRun(rootDir, runId, {
     multiAgent: {
-      status: finalVerdict.status === "blocked" ? "blocked" : "completed",
+      status: finalVerdict.status === "blocked"
+        ? "blocked"
+        : (rollout.rolloutMode === "advisory" ? "advisory" : "completed"),
       currentPhase: "completed",
       finalVerdict
     }
@@ -190,6 +222,9 @@ async function executePhase(rootDir, config, payload, phase, state, rollout, opt
       artifacts: state.allArtifacts,
       contextBundle: payload.contextBundle,
       attempt: options.attempt ?? 1
+    });
+    await updateRunHandoff(rootDir, runId, handoffRecord.handoff.id, {
+      status: "consumed"
     });
 
     for (const artifact of execution.output.artifacts) {
@@ -327,9 +362,15 @@ async function runBoundedRework(rootDir, config, payload, phaseGraph, verificati
     lastPhaseArtifacts.push(...verificationResult.phaseArtifacts);
     const stillFailing = latestVerdicts.filter((item) => item.status === "needs-rework" || item.status === "blocked");
     if (stillFailing.length === 0) {
+      await updateRunRetryRequest(rootDir, payload.runId, retryRecord.retryRequest.id, {
+        status: "completed"
+      });
       break;
     }
     if (attempt >= rollout.maxReworkLoops) {
+      await updateRunRetryRequest(rootDir, payload.runId, retryRecord.retryRequest.id, {
+        status: "exhausted"
+      });
       blocked = true;
       break;
     }
@@ -410,7 +451,7 @@ function chooseFinalVerdict(verdicts) {
 function normalizeRuntimeConfig(config) {
   return {
     enabled: config.enabled !== false,
-    rolloutMode: config.rolloutMode ?? "active",
+    rolloutMode: ["shadow", "advisory", "active"].includes(config.rolloutMode) ? config.rolloutMode : "active",
     maxReworkLoops: Math.max(1, Number(config.maxReworkLoops) || 2),
     requireWritableOwnerForRework: config.requireWritableOwnerForRework !== false
   };

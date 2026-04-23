@@ -78,10 +78,14 @@ export async function runTaskFlow(rootDir, config, options = {}) {
       rootDir,
       {
         task,
-        summary: orchestration.memoryCapture?.summary ?? summary,
-        artifacts: orchestration.memoryCapture?.kind
+        summary: orchestration.rolloutMode === "advisory"
+          ? summary
+          : (orchestration.memoryCapture?.summary ?? summary),
+        artifacts: orchestration.rolloutMode === "advisory"
+          ? artifacts
+          : (orchestration.memoryCapture?.kind
           ? uniqueArtifacts([...(artifacts ?? []), orchestration.memoryCapture.kind])
-          : artifacts
+          : artifacts)
       },
       config
     );
