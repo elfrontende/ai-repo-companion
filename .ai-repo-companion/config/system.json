@@ -15,6 +15,14 @@
     "enabled": true,
     "rolloutMode": "active",
     "defaultAdapter": "local-contract",
+    "liveProvider": "codex",
+    "providerByAgentProvider": {
+      "default": "codex",
+      "claude": "codex",
+      "gemini": "codex",
+      "codex": "codex",
+      "cursor": "cursor"
+    },
     "maxReworkLoops": 2,
     "allowConsultations": true,
     "requireWritableOwnerForRework": true,
@@ -35,6 +43,65 @@
         "maxSuccessCriteria": 3,
         "maxTaskSummaryChars": 220
       }
+    },
+    "nativeCursor": {
+      "enabled": false,
+      "binary": "cursor",
+      "model": "",
+      "mode": "agent",
+      "sandbox": "enabled",
+      "trustWorkspace": true,
+      "force": false,
+      "maxAttempts": 2,
+      "retryBackoffMs": 1500,
+      "extraArgs": [],
+      "allowUnknownConsultationTargets": false,
+      "promptControls": {
+        "maxArtifacts": 4,
+        "maxArtifactSummaryChars": 140,
+        "maxHandoffFindings": 4,
+        "maxAllowedActions": 3,
+        "maxSuccessCriteria": 3,
+        "maxTaskSummaryChars": 220
+      }
+    },
+    "commandAdapters": {
+      "default": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "codex": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "cursor": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "claude": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "gemini": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      },
+      "external": {
+        "enabled": false,
+        "command": "",
+        "args": []
+      }
+    },
+    "integration": {
+      "defaultEditor": "both",
+      "packOutputDir": "state/integration/host-pack",
+      "cursorRuleFile": ".cursor/rules/ai-repo-companion.mdc",
+      "codexInstructionsFile": "AGENTS.md"
     }
   },
   "memoryPolicy": {

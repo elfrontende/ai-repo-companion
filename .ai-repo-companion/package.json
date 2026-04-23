@@ -22,6 +22,7 @@
     "approve": "node src/cli.mjs approve",
     "worker": "node src/cli.mjs worker",
     "demo": "node src/cli.mjs demo",
+    "integrate": "node src/cli.mjs integrate",
     "test": "node tests/smoke.mjs"
   }
 }
